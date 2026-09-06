@@ -1,0 +1,34 @@
+{
+  "name": "ait",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AIT - an AI IT technician that diagnoses, remediates, documents and knows when to escalate.",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "ait": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && mkdir -p dist/src/server/console && cp src/server/console/index.html dist/src/server/console/index.html",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "demo": "tsx src/cli.ts demo",
+    "demo:all": "tsx src/cli.ts demo --all",
+    "serve": "tsx src/server/index.ts",
+    "cli": "tsx src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0",
+    "openai": "^7.10.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

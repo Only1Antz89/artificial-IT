@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIT — Technician Console</title>
+<style>
+  :root {
+    --bg: #f7f8fa; --panel: #ffffff; --ink: #101828; --muted: #667085;
+    --line: #e4e7ec; --accent: #175cd3; --ok: #027a48; --ok-bg: #ecfdf3;
+    --warn: #b54708; --warn-bg: #fffaeb; --stop: #b42318; --stop-bg: #fef3f2;
+    --code: #1d2939;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0c111d; --panel: #161b26; --ink: #f5f6f7; --muted: #94a1b8;
+      --line: #26303f; --accent: #84adff; --ok: #75e0a7; --ok-bg: #05261a;
+      --warn: #fec84b; --warn-bg: #2b1c05; --stop: #fda29b; --stop-bg: #2f1211;
+      --code: #0c111d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { border-bottom: 1px solid var(--line); background: var(--panel);
+    padding: 18px 24px; position: sticky; top: 0; z-index: 10; }
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  h1 { margin: 0; font-size: 17px; letter-spacing: -0.01em; }
+  h1 span { color: var(--muted); font-weight: 400; }
+  .sub { color: var(--muted); font-size: 12.5px; margin-top: 3px; }
+  main { max-width: 1120px; margin: 0 auto; padding: 24px; }
+  .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    margin-bottom: 22px; }
+  button, select { font: inherit; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--ink); padding: 8px 14px; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff;
+    font-weight: 600; }
+  button:disabled { opacity: .55; cursor: progress; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    margin-bottom: 18px; overflow: hidden; }
+  .card > .head { padding: 14px 18px; border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+  .card > .body { padding: 16px 18px; }
+  .title { font-weight: 650; }
+  .demo-note { color: var(--muted); font-size: 12.5px; margin-top: 3px; max-width: 66ch; }
+  .pill { font-size: 11.5px; font-weight: 650; padding: 3px 9px; border-radius: 999px;
+    white-space: nowrap; }
+  .pill.ok { background: var(--ok-bg); color: var(--ok); }
+  .pill.warn { background: var(--warn-bg); color: var(--warn); }
+  .pill.stop { background: var(--stop-bg); color: var(--stop); }
+  .steps { list-style: none; margin: 0; padding: 0; }
+  .steps li { padding: 10px 0; border-bottom: 1px dashed var(--line); }
+  .steps li:last-child { border-bottom: 0; }
+  .step-head { display: flex; gap: 9px; align-items: baseline; }
+  .mark { width: 18px; flex: none; text-align: center; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  code.cmd { background: var(--code); color: #d1e0ff; padding: 2px 7px;
+    border-radius: 5px; font-size: 12.5px; }
+  .obs { color: var(--muted); font-size: 12.5px; margin: 5px 0 0 27px; }
+  .guard { margin: 7px 0 0 27px; padding: 8px 11px; border-radius: 7px;
+    background: var(--stop-bg); color: var(--stop); font-size: 12.5px; }
+  .guard b { font-weight: 650; }
+  .sec { margin-top: 18px; }
+  .sec h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase;
+    letter-spacing: .06em; color: var(--muted); }
+  .reply { background: var(--bg); border: 1px solid var(--line); border-radius: 9px;
+    padding: 13px 15px; white-space: pre-wrap; }
+  .handover { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 14px; }
+  .handover ul { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--muted); }
+  .shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 14px; }
+  .shot { border: 1px solid var(--line); border-radius: 9px; overflow: hidden;
+    background: var(--bg); }
+  .shot svg { display: block; width: 100%; height: auto; }
+  .shot .cap { padding: 7px 11px; font-size: 12px; color: var(--muted);
+    border-top: 1px solid var(--line); }
+  details { margin-top: 12px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+  pre.audit { background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px; overflow-x: auto; font-size: 11.5px; margin-top: 9px;
+    max-height: 340px; }
+  .note { white-space: pre-wrap; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 9px; padding: 13px 15px; font-size: 12.5px; overflow-x: auto; }
+  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+  .summary-row { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 18px;
+    padding: 14px 18px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; }
+  .stat b { display: block; font-size: 20px; }
+  .stat span { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>AIT <span>— AI IT technician, console view</span></h1>
+    <div class="sub" id="provider">Choose a scenario and run it.</div>
+  </div>
+</header>
+
+<main>
+  <div class="controls">
+    <select id="scenario"><option value="">All scenarios</option></select>
+    <select id="providerSel">
+      <option value="">Provider: auto</option>
+      <option value="claude">Claude (Anthropic)</option>
+      <option value="openai">OpenAI</option>
+      <option value="offline">Offline playbooks</option>
+    </select>
+    <button class="primary" id="run">Run</button>
+  </div>
+  <div id="summary"></div>
+  <div id="out"><div class="empty">Nothing run yet.</div></div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (ch) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
+
+const MARK = { success: "✓", failed: "✗", blocked: "⛔", awaiting_approval: "⏸",
+  awaiting_user: "👤", skipped: "·" };
+
+async function loadScenarios() {
+  const { scenarios } = await (await fetch("/api/scenarios")).json();
+  for (const s of scenarios) {
+    const opt = document.createElement("option");
+    opt.value = s.key;
+    opt.textContent = s.title;
+    $("scenario").append(opt);
+  }
+}
+
+function statusPill(status) {
+  const cls = status === "resolved" ? "ok" : status === "escalated" ? "warn" : "stop";
+  return `<span class="pill ${cls}">${esc(status)}</span>`;
+}
+
+function renderStep(r) {
+  const cmd = r.command ? ` <code class="cmd">${esc(r.command.command)}</code>` : "";
+  const guard = (r.outcome === "blocked" || r.outcome === "awaiting_approval")
+    ? `<div class="guard"><b>Guardrail — ${esc(r.verdict.rule_id)}</b><br>${esc(r.verdict.reason)}</div>`
+    : "";
+  const obs = r.observation ? `<div class="obs">${esc(r.observation)}</div>` : "";
+  return `<li>
+    <div class="step-head"><span class="mark">${MARK[r.outcome] ?? "·"}</span>
+      <span>${esc(r.step.intent)}${cmd}</span></div>
+    ${obs}${guard}
+  </li>`;
+}
+
+function renderHandover(e) {
+  const block = (title, items) => items.length
+    ? `<div><h4>${title}</h4><ul>${items.map((i) => `<li>${esc(i)}</li>`).join("")}</ul></div>`
+    : "";
+  return `<div class="handover">
+    ${block("What we know", e.handover.what_we_know)}
+    ${block("What we tried", e.handover.what_we_tried)}
+    ${block("What we could not do", e.handover.what_we_could_not_do)}
+    ${block("Suggested next steps", e.handover.suggested_next_steps)}
+  </div>`;
+}
+
+function renderResult(res) {
+  const { run, scenario, attachments, internal_note } = res;
+  const annotated = attachments.filter((a) => a.file_name.includes("annotated"));
+  const shots = (annotated.length ? annotated : attachments).slice(0, 4);
+
+  return `<div class="card">
+    <div class="head">
+      <div>
+        <div class="title">${esc(scenario.title)}</div>
+        <div class="demo-note">${esc(scenario.demonstrates)}</div>
+      </div>
+      ${statusPill(run.status)}
+    </div>
+    <div class="body">
+      <div class="sec">
+        <h4>Understanding</h4>
+        <div>${esc(run.intake?.summary ?? "-")}</div>
+        <div class="obs" style="margin-left:0">category ${esc(run.intake?.category)} ·
+          sentiment ${esc(run.intake?.user_sentiment)}
+          ${run.knowledge_used.length ? ` · recalled ${run.knowledge_used.length} prior ticket(s)` : " · no prior tickets matched"}</div>
+      </div>
+
+      <div class="sec">
+        <h4>Diagnosis (${esc(run.diagnosis?.confidence ?? "-")} confidence)</h4>
+        <ul style="margin:0;padding-left:18px">
+          ${(run.diagnosis?.hypotheses ?? []).map((h, i) =>
+            `<li>${esc(h.statement)} <span class="obs" style="margin:0">[${esc(h.confidence)}]${i === run.diagnosis.leading_index ? " ← pursued" : ""}</span></li>`
+          ).join("")}
+        </ul>
+      </div>
+
+      <div class="sec">
+        <h4>Steps (${run.results.length})</h4>
+        <ul class="steps">${run.results.map(renderStep).join("") || "<li class='obs'>No steps were run.</li>"}</ul>
+      </div>
+
+      ${shots.length ? `<div class="sec"><h4>Evidence attached to the ticket</h4>
+        <div class="shots">${shots.map((a) => `<div class="shot">${a.svg ?? ""}
+          <div class="cap">${esc(a.file_name)}</div></div>`).join("")}</div></div>` : ""}
+
+      ${run.escalation?.triggered ? `<div class="sec">
+        <h4>Escalated to ${esc(run.escalation.route_to)} — ${esc(run.escalation.triggers.join(", "))}</h4>
+        <div class="reply">${esc(run.escalation.ask)}</div>
+        <div style="margin-top:12px">${renderHandover(run.escalation)}</div>
+      </div>` : ""}
+
+      <div class="sec">
+        <h4>Reply sent to the user</h4>
+        <div class="reply">${esc(run.documentation?.user_reply ?? "")}</div>
+      </div>
+
+      <details>
+        <summary>Internal note written to the ticket</summary>
+        <div class="note">${esc(internal_note)}</div>
+      </details>
+
+      <details>
+        <summary>Audit trail (${run.audit.length} entries)</summary>
+        <pre class="audit">${esc(run.audit.map((a) =>
+          `${String(a.seq).padStart(2, "0")}  ${a.event.padEnd(20)} ${a.actor.padEnd(7)} ${a.summary}`
+        ).join("\n"))}</pre>
+      </details>
+    </div>
+  </div>`;
+}
+
+$("run").addEventListener("click", async () => {
+  const btn = $("run");
+  btn.disabled = true;
+  btn.textContent = "Running…";
+  $("out").innerHTML = `<div class="empty">Working the queue…</div>`;
+  $("summary").innerHTML = "";
+
+  try {
+    const key = $("scenario").value;
+    const provider = $("providerSel").value;
+    const data = await (await fetch("/api/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...(key ? { scenarios: [key] } : {}),
+        ...(provider ? { provider } : {}),
+      }),
+    })).json();
+
+    if (data.error) throw new Error(data.error);
+
+    $("provider").textContent =
+      `Reasoning provider: ${data.provider.name} (${data.provider.model}) — ${data.provider.note}`;
+
+    const resolved = data.results.filter((r) => r.run.status === "resolved").length;
+    const escalated = data.results.filter((r) => r.run.status === "escalated").length;
+    const blocked = data.results.reduce((n, r) =>
+      n + r.run.results.filter((s) => s.outcome === "blocked").length, 0);
+
+    $("summary").innerHTML = `<div class="summary-row">
+      <div class="stat"><b>${data.results.length}</b><span>tickets worked</span></div>
+      <div class="stat"><b>${resolved}</b><span>resolved</span></div>
+      <div class="stat"><b>${escalated}</b><span>escalated to a human</span></div>
+      <div class="stat"><b>${blocked}</b><span>actions blocked by guardrails</span></div>
+      <div class="stat"><b>${data.knowledge_size}</b><span>knowledge entries</span></div>
+    </div>`;
+
+    $("out").innerHTML = data.results.map(renderResult).join("");
+  } catch (err) {
+    $("out").innerHTML = `<div class="empty">Run failed: ${esc(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Run";
+  }
+});
+
+loadScenarios();
+</script>
+</body>
+</html>
