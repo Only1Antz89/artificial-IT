@@ -56,6 +56,56 @@ Pages wired down:                     50000.`;
     expect(parseMemoryUsage(vmstat)).toBe(40);
   });
 
+  // Real macOS output, since the macOS path cannot be exercised on CI Linux.
+  // Apple Silicon uses 16K pages, `df` labels the column "Capacity" and carries
+  // a second percentage (%iused) that must not be mistaken for it, and every
+  // vm_stat value ends with a period.
+  describe("macOS output shapes", () => {
+    const dfApple = `Filesystem       Size   Used  Avail Capacity iused      ifree %iused  Mounted on
+/dev/disk3s1s1  926Gi  9.6Gi  111Gi     8%  404163 1163983797    0%   /`;
+
+    const dfFull = `Filesystem       Size   Used  Avail Capacity iused      ifree %iused  Mounted on
+/dev/disk3s1s1  494Gi  466Gi   23Gi    96%  512000  999999999    1%   /`;
+
+    const vmStat = `Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                               47230.
+Pages active:                            803416.
+Pages inactive:                          792628.
+Pages speculative:                        12442.
+Pages wired down:                        246971.`;
+
+    const vmStatPressed = `Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                                1200.
+Pages active:                           1900000.
+Pages inactive:                            8000.
+Pages wired down:                        400000.`;
+
+    it("reads the Capacity column, not %iused", () => {
+      expect(parseDiskUsage(dfApple)).toBe(8);
+      expect(parseDiskUsage(dfFull)).toBe(96);
+    });
+
+    it("reads Apple Silicon vm_stat, periods and all", () => {
+      const healthy = parseMemoryUsage(vmStat);
+      expect(healthy).toBeGreaterThan(0);
+      expect(healthy).toBeLessThan(92); // a normal Mac must not trip the alert
+      expect(parseMemoryUsage(vmStatPressed)).toBeGreaterThanOrEqual(92);
+    });
+
+    it("reads load average from macOS uptime, which pluralises it", () => {
+      const mac = "20:15  up 3 days, 10:22, 2 users, load averages: 1.53 1.72 1.86";
+      expect(mac.match(/load average[s]?:\s*([\d.]+)/i)?.[1]).toBe("1.53");
+    });
+
+    it("reads %MEM from macOS ps column order", () => {
+      const ps = `  PID %MEM %CPU COMM
+  482 61.9  3.1 /Applications/Leaky.app/Contents/MacOS/leaky`;
+      const cols = ps.trim().split("\n")[1]!.trim().split(/\s+/);
+      expect(Number(cols[1])).toBe(61.9);
+      expect(cols[3]).toContain("leaky");
+    });
+  });
+
   it("returns undefined rather than guessing on output it cannot parse", () => {
     expect(parseDiskUsage("not a df table")).toBeUndefined();
     expect(parseMemoryUsage("not memory output")).toBeUndefined();

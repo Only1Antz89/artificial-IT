@@ -11,12 +11,14 @@ not a prompt, and it does not consult the model.
 
 ```bash
 npm install
+npm run doctor        # preflight: will this actually work here?
 npm run serve         # technician console on http://localhost:3000
 npm run demo          # every simulated scenario, in the terminal
 npm run local         # run against THIS machine
 ```
 
-No API key needed for any of the above.
+No API key needed for any of the above. Setting one up on a Mac for a live demo:
+**[QUICKSTART.md](QUICKSTART.md)**, which includes a running order.
 
 ---
 

@@ -185,7 +185,8 @@ export const LOCAL_CHECKS: LocalCheck[] = [
     intent: "Identify the processes using the most memory",
     command: {
       linux: "ps -eo pid,pmem,pcpu,comm --sort=-pmem",
-      macos: "ps -Ao pid,pmem,pcpu,comm -r",
+      // `-m` sorts by memory. `-r` sorts by CPU and would not match the intent.
+      macos: "ps -Ao pid,pmem,pcpu,comm -m",
       windows: "tasklist",
     },
     requires: { linux: "ps", macos: "ps", windows: "tasklist" },

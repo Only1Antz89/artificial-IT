@@ -13,6 +13,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && mkdir -p dist/src/server/console && cp src/server/console/index.html dist/src/server/console/index.html",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "doctor": "tsx src/cli.ts doctor",
     "demo": "tsx src/cli.ts demo",
     "demo:all": "tsx src/cli.ts demo --all",
     "serve": "tsx src/server/index.ts",
@@ -20,7 +21,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "local": "tsx src/cli.ts local",
-    "providers": "tsx src/cli.ts providers"
+    "providers": "tsx src/cli.ts providers",
+    "reset": "tsx src/cli.ts reset"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",

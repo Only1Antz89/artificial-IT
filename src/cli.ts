@@ -21,6 +21,8 @@ import type { Scenario } from "./demo/scenarios.js";
 import type { ProviderName } from "./agent/select-brain.js";
 import { LOCAL_SCENARIOS, runLocal, type LocalScenarioKey } from "./demo/run-local.js";
 import { selectBrain } from "./agent/select-brain.js";
+import { runDoctor, type CheckState } from "./doctor.js";
+import * as nodeFs from "node:fs";
 import { checkClaudeModel, checkOpenAIModel, withTimeout } from "./agent/model-check.js";
 
 const c = {
@@ -206,6 +208,59 @@ async function cmdLocal(args: string[]): Promise<void> {
   console.log("");
 }
 
+/**
+ * Clear evidence and learned knowledge.
+ *
+ * The knowledge base is real and persists between runs, which is the behaviour
+ * the demo is showing off - and exactly why a rehearsal pollutes the next run.
+ * This puts it back to a blank slate.
+ */
+function cmdReset(): void {
+  const { rmSync, existsSync } = nodeFs;
+  const dir = "run-artifacts";
+  if (!existsSync(dir)) {
+    console.log(`\n  Nothing to clear — ${dir} does not exist.\n`);
+    return;
+  }
+  rmSync(dir, { recursive: true, force: true });
+  console.log(`\n  ${c.green("Cleared")} ./${dir} — evidence and learned knowledge.\n`);
+}
+
+/** Preflight everything before a live demo. */
+async function cmdDoctor(args: string[]): Promise<void> {
+  const port = Number(readFlag(args, "--port") ?? process.env["PORT"] ?? 3000);
+  console.log(`\n${c.bold("AIT preflight")}\n`);
+
+  const report = await runDoctor(port);
+
+  const mark: Record<CheckState, string> = {
+    ok: c.green("✓"),
+    warn: c.yellow("!"),
+    fail: c.red("✗"),
+  };
+
+  for (const check of report.checks) {
+    console.log(`  ${mark[check.state]} ${c.bold(check.name.padEnd(26))} ${check.detail}`);
+    if (check.fix) {
+      for (const line of wrap(check.fix, 66)) console.log(`      ${c.dim(line)}`);
+    }
+  }
+
+  console.log("");
+  if (report.blocked) {
+    console.log(`  ${c.red("Not ready.")} Fix the ✗ items above, then run this again.\n`);
+    process.exitCode = 1;
+    return;
+  }
+  if (report.ok) {
+    console.log(`  ${c.green("Ready.")} Start the console with ${c.bold("npm run serve")}.\n`);
+    return;
+  }
+  console.log(
+    `  ${c.yellow("Ready, with caveats.")} The ! items will not stop the demo — read them so nothing surprises you.\n`,
+  );
+}
+
 /** Report which providers are configured, and whether their models exist. */
 async function cmdProviders(): Promise<void> {
   console.log(`\n${c.bold("Reasoning providers")}\n`);
@@ -343,6 +398,8 @@ function usage(): void {
   console.log(`
 ${c.bold("AIT")} — AI IT technician
 
+  ait doctor                  preflight everything before a live demo
+  ait reset                   clear evidence and learned knowledge
   ait demo [scenario...]      run the simulated demo (all scenarios by default)
   ait local [scenario]        run against THIS machine (local-health | local-danger)
   ait demo --provider openai  force a reasoning provider (claude|openai|offline)
@@ -365,6 +422,12 @@ async function main(): Promise<void> {
       break;
     case "local":
       await cmdLocal(args);
+      break;
+    case "doctor":
+      await cmdDoctor(args);
+      break;
+    case "reset":
+      cmdReset();
       break;
     case "providers":
       await cmdProviders();

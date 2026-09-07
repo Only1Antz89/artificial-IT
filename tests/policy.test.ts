@@ -110,6 +110,11 @@ describe("read-only diagnostics run without asking", () => {
     "ps aux",
     "dig example.internal",
     "sudo ip addr",
+    // macOS diagnostics: the lookup form is read-only.
+    "dscacheutil -q host -a name example.com",
+    "vm_stat",
+    "ps -Ao pid,pmem,pcpu,comm -m",
+    "sw_vers",
   ];
 
   for (const command of allowed) {
@@ -163,6 +168,9 @@ describe("changes to the device need sign-off", () => {
     ["shutdown /r /t 0", "approve.reboot"],
     ["apt-get install -y curl", "approve.software-change"],
     ["ipconfig /flushdns", "approve.registry-and-config-write"],
+    // The mutating dscacheutil form stays gated even though the base command
+    // is on the read-only allowlist - approval rules are checked first.
+    ["dscacheutil -flushcache", "approve.registry-and-config-write"],
     ["reg add HKLM\\Software\\Acme /v Mode /d 1", "approve.registry-and-config-write"],
     ["taskkill /IM outlook.exe /F", "approve.process-termination"],
   ];

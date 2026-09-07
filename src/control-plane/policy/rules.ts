@@ -350,6 +350,10 @@ export const READ_ONLY_COMMANDS = new Set([
   // macos / linux diagnostics
   "system_profiler", "sw_vers", "diskutil", "pmset", "log", "sysctl", "vm_stat",
   "hostnamectl", "timedatectl",
+  // `dscacheutil -q ...` is a read-only lookup. The mutating `-flushcache`
+  // form is caught by `approve.registry-and-config-write`, which is evaluated
+  // before this allowlist, so allowing the base command here is safe.
+  "dscacheutil",
   "launchctl", "brew", "softwareupdate", "lscpu", "lsblk", "lspci", "lsusb",
   "journalctl", "dmesg", "systemctl",
   // printing
