@@ -35,6 +35,15 @@ export interface AdHocRequest {
   vip?: boolean;
   priority?: Severity;
   target?: AdHocTarget;
+  /**
+   * Whether the user agreed to checks on their machine.
+   *
+   * Refusing is not the same as having no machine. The device stays attached
+   * with consent withheld, so the consent guardrail is what stops the work -
+   * which is both the truth and a far more useful thing to show a technician
+   * than a ticket that mysteriously has no device.
+   */
+  consent?: boolean;
 }
 
 export const AD_HOC_TARGETS: { key: AdHocTarget; label: string; note: string }[] = [
@@ -119,7 +128,9 @@ export function adHocTicket(request: AdHocRequest): Ticket {
     );
   }
 
-  const device = deviceFor(target);
+  const base = deviceFor(target);
+  const consent = request.consent ?? true;
+  const device = base ? { ...base, consent_granted: consent } : undefined;
   const now = nowIso();
 
   return {

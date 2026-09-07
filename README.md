@@ -22,6 +22,35 @@ No API key needed for any of the above. Setting one up on a Mac for a live demo:
 
 ---
 
+## Two surfaces
+
+AIT has two front doors, because it has two audiences.
+
+**`/portal` — the person with the problem.** They describe it in their own
+words, say whether IT may run checks on their machine, and then watch progress
+in plain language: *"we're checking a few things"*, *"a technician is checking
+before we change anything"*, and finally the reply. If AIT needs one more
+detail, **the question arrives here**, because it is their question to answer.
+
+**`/` — the technician.** Tickets from the portal appear in an inbox live, with
+who reported them and their state. A technician opens one and sees everything:
+the commands, the output, the annotated screenshots, which guardrail fired and
+why, the approval gate, the write-up, the audit trail.
+
+The split is enforced rather than styled. `userView()` in
+`src/server/tickets.ts` is an **allowlist** — the portal can only ever be sent
+fields that are named there, so a technician-only field added later cannot leak
+into it by being forgotten. There is a test that pins the exact key set.
+
+```bash
+npm run serve
+# technician console → http://localhost:3000
+# user portal        → http://localhost:3000/portal
+```
+
+For a demo, put them side by side: submit from the portal on one screen and
+watch it get worked on the other.
+
 ## The console
 
 `npm run serve` opens a technician console. It is not a report of a finished
@@ -69,7 +98,8 @@ rectangle.
 | Reads and updates Zendesk tickets | `src/integrations/zendesk/` |
 | Attaches annotated screenshots to tickets | `src/execution-plane/annotate.ts` |
 | Learns from previous tickets | `src/knowledge/` |
-| Live technician console, free-text intake, in-browser approvals and Q&A | `src/server/`, `src/demo/adhoc.ts` |
+| User portal for reporting an issue | `src/server/portal/`, `src/server/tickets.ts` |
+| Live technician console, free-text intake, in-browser approvals | `src/server/`, `src/demo/adhoc.ts` |
 | Undo an applied change | `src/server/undo.ts` |
 | Queue mode and shift metrics | `src/demo/run-queue.ts`, `src/demo/metrics.ts` |
 | Remote device sessions over MeshCentral | `src/execution-plane/remote.ts` |
@@ -256,7 +286,7 @@ does not block a run that would otherwise succeed — it is reported as
 ## Development
 
 ```bash
-npm test          # 240 tests
+npm test          # 255 tests
 npm run typecheck
 npm run build
 ```

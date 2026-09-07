@@ -32,6 +32,7 @@ import { localDangerTicket, localHealthTicket, localSession, hostPlatform } from
 import {
   AD_HOC_TARGETS,
   adHocTicket,
+  deriveSubject,
   localTargetAvailable,
   type AdHocRequest,
 } from "../demo/adhoc.js";
@@ -48,12 +49,20 @@ import {
   toTicket,
 } from "../integrations/zendesk/index.js";
 import { RunRegistry, type RunSession } from "./run-registry.js";
+import {
+  TicketDesk,
+  statusForRun,
+  userUpdateFor,
+  userView,
+  type DeskTicket,
+} from "./tickets.js";
 import { undoChange, undoableChanges } from "./undo.js";
 import { runQueue } from "../demo/run-queue.js";
 import type { DeviceSession } from "../execution-plane/device.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const registry = new RunRegistry();
+const desk = new TicketDesk();
 
 /**
  * How long a device session stays open after its run, so a change can be undone.
@@ -62,6 +71,16 @@ const registry = new RunRegistry();
  * overnight is not holding a live session on someone's machine.
  */
 const UNDO_WINDOW_MS = 15 * 60 * 1000;
+
+/**
+ * How long a ticket from the portal waits for a technician to approve a change.
+ *
+ * Shorter than the console's own window on purpose. A technician who started a
+ * run is by definition watching it; someone who reported a problem through the
+ * portal has no idea whether anyone is at a console, and leaving them on "being
+ * looked at now" for ten minutes is worse service than escalating in two.
+ */
+const PORTAL_APPROVAL_WINDOW_MS = 2 * 60 * 1000;
 
 /* ------------------------------------------------------------------ *
  * Helpers
@@ -94,6 +113,91 @@ interface StartRunBody {
   /** A ticket typed on the spot. */
   ticket?: AdHocRequest;
   provider?: ProviderName;
+  /** The desk ticket this run is working, when it came from the portal. */
+  deskTicketId?: string;
+}
+
+/**
+ * The approval gate for a ticket that came from the portal.
+ *
+ * Same gate, but the person who reported the problem is told what is happening
+ * while it waits - "with one of our technicians" rather than a silent pause -
+ * and it gives up sooner, because nobody may be at a console.
+ */
+function deskGate(session: RunSession, deskId: string) {
+  const gate = session.gate(PORTAL_APPROVAL_WINDOW_MS);
+  return {
+    name: gate.name,
+    async requestApproval(request: Parameters<typeof gate.requestApproval>[0]) {
+      desk.update(deskId, (t) => {
+        t.status = "waiting-on-technician";
+        t.updates.push({
+          at: new Date().toISOString(),
+          // What was found, not what will be run.
+          text: "We think we know what is wrong. A technician is checking before we change anything.",
+        });
+      });
+
+      const outcome = await gate.requestApproval(request);
+
+      desk.update(deskId, (t) => {
+        t.status = "working";
+        t.updates.push({
+          at: new Date().toISOString(),
+          text: outcome.approved
+            ? "A technician has approved the fix — applying it now."
+            : "A technician would rather handle this one personally.",
+        });
+      });
+      return outcome;
+    },
+  };
+}
+
+/**
+ * Ask the user, through their portal.
+ *
+ * Wraps the run session's own `ask` so the question is registered for the
+ * console too - both surfaces see the same pending question, and either can
+ * resolve it.
+ */
+function deskQuestion(session: RunSession, deskId: string) {
+  const ask = session.ask();
+  return async (question: string, step: Parameters<typeof ask>[1]) => {
+    desk.update(deskId, (t) => {
+      t.status = "waiting-on-you";
+      t.updates.push({
+        at: new Date().toISOString(),
+        text: "We need one detail from you before we can go further.",
+      });
+    });
+
+    // The session emits `question-asked`; mirror it onto the desk ticket so the
+    // portal can render it without knowing about runs at all.
+    const unsubscribe = session.subscribe((event) => {
+      if (event.type === "question-asked") {
+        desk.update(deskId, (t) => {
+          t.question = event.question;
+        });
+      }
+      if (event.type === "question-answered") {
+        desk.update(deskId, (t) => {
+          delete t.question;
+          t.status = "working";
+          t.updates.push({
+            at: new Date().toISOString(),
+            text: "Thanks — carrying on with that.",
+          });
+        });
+      }
+    });
+
+    try {
+      return await ask(question, step);
+    } finally {
+      unsubscribe();
+    }
+  };
 }
 
 /** Open a session against whichever machine an ad-hoc ticket names. */
@@ -121,6 +225,19 @@ function adHocSession(target: AdHocRequest["target"]): DeviceSession | undefined
  */
 function startRun(body: StartRunBody, workdir: string): RunSession {
   const session = registry.create();
+  const deskId = body.deskTicketId;
+
+  // Keep the person who reported it in the loop, in their own language.
+  const tellUser = (text?: string) => {
+    if (deskId && text) desk.note(deskId, text);
+  };
+
+  if (deskId) {
+    desk.update(deskId, (t) => {
+      t.runId = session.id;
+      t.status = "working";
+    });
+  }
 
   void (async () => {
     let device: DeviceSession | undefined;
@@ -187,11 +304,18 @@ function startRun(body: StartRunBody, workdir: string): RunSession {
         ...(device ? { session: device } : {}),
         // The browser is the technician: gated steps wait for a real decision,
         // and a question to the user waits for a real answer.
-        gate: session.gate(),
-        askUser: session.ask(),
+        gate: deskId ? deskGate(session, deskId) : session.gate(),
+        // A clarifying question belongs to the person who raised the ticket,
+        // not to the technician watching. It is delivered to their portal; the
+        // console shows it as outstanding and a technician may still answer on
+        // their behalf, as they would if they picked up the phone.
+        askUser: deskId ? deskQuestion(session, deskId) : session.ask(),
         evidenceRoot: workdir,
         stepBudget: 10,
-        onEvent: (event) => session.emit(event),
+        onEvent: (event) => {
+          session.emit(event);
+          tellUser(userUpdateFor(event as unknown as { type: string }));
+        },
       });
 
       // Write back to the help desk for the simulated scenarios, attachments
@@ -228,12 +352,33 @@ function startRun(body: StartRunBody, workdir: string): RunSession {
       });
       session.finish("finished");
       session.keepOpenFor(UNDO_WINDOW_MS);
+
+      if (deskId) {
+        desk.update(deskId, (t) => {
+          t.status = statusForRun(run);
+          delete t.question;
+          if (run.documentation?.user_reply) t.reply = run.documentation.user_reply;
+          if (run.status === "resolved") t.resolvedAt = new Date().toISOString();
+        });
+      }
     } catch (err) {
       session.emit({
         type: "error",
         message: err instanceof Error ? err.message : String(err),
       });
       session.finish("failed");
+      if (deskId) {
+        desk.update(deskId, (t) => {
+          t.status = "failed";
+          delete t.question;
+          t.updates.push({
+            at: new Date().toISOString(),
+            // The user is told something went wrong, not what went wrong -
+            // a stack trace is not an update, it is an escalation.
+            text: "Something went wrong on our side. A technician has been alerted.",
+          });
+        });
+      }
     } finally {
       await device?.end();
     }
@@ -251,6 +396,7 @@ export async function startServer(
   workdir = "run-artifacts",
 ): Promise<{ port: number; close: () => Promise<void> }> {
   const consoleHtml = readFileSync(join(here, "console", "index.html"), "utf8");
+  const portalHtml = readFileSync(join(here, "portal", "index.html"), "utf8");
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -260,6 +406,111 @@ export async function startServer(
       if (req.method === "GET" && path === "/") {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         res.end(consoleHtml);
+        return;
+      }
+
+      // The user-facing half. Everything under /api/portal answers with
+      // `userView`, which is an allowlist - a technician-only field added later
+      // cannot leak here by being forgotten.
+      if (req.method === "GET" && (path === "/portal" || path === "/portal/")) {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(portalHtml);
+        return;
+      }
+
+      if (req.method === "POST" && path === "/api/portal/tickets") {
+        const body = await readBody<{
+          description?: string;
+          reportedBy?: string;
+          target?: string;
+          consent?: boolean;
+          provider?: ProviderName;
+        }>(req);
+
+        const description = (body?.description ?? "").trim();
+        if (description.length < 10) {
+          json(res, 400, {
+            error: "Tell us a little more about the problem so we can look into it.",
+          });
+          return;
+        }
+
+        const target = body?.target ?? "this-machine";
+        // No consent means no device work. The portal is where that decision is
+        // actually made, so it is recorded here rather than assumed anywhere.
+        const consent = body?.consent === true;
+
+        const ticket = desk.submit({
+          reportedBy: (body?.reportedBy ?? "").trim() || "A colleague",
+          description,
+          summary: deriveSubject(description),
+          target,
+          consentGranted: consent,
+        });
+
+        startRun(
+          {
+            ticket: {
+              description,
+              requester: ticket.reportedBy,
+              target: target as AdHocRequest["target"],
+              consent,
+            },
+            ...(body?.provider ? { provider: body.provider } : {}),
+            deskTicketId: ticket.id,
+          },
+          workdir,
+        );
+
+        json(res, 202, { ticket: userView(ticket) });
+        return;
+      }
+
+      const portalTicket = path.match(/^\/api\/portal\/tickets\/([^/]+)$/);
+      if (req.method === "GET" && portalTicket) {
+        const ticket =
+          desk.get(portalTicket[1]!) ?? desk.byReference(portalTicket[1]!);
+        if (!ticket) {
+          json(res, 404, { error: "We cannot find a report with that reference." });
+          return;
+        }
+        json(res, 200, { ticket: userView(ticket) });
+        return;
+      }
+
+      const portalStream = path.match(/^\/api\/portal\/tickets\/([^/]+)\/events$/);
+      if (req.method === "GET" && portalStream) {
+        streamPortalTicket(res, portalStream[1]!);
+        return;
+      }
+
+      const portalAnswer = path.match(/^\/api\/portal\/tickets\/([^/]+)\/answer$/);
+      if (req.method === "POST" && portalAnswer) {
+        const ticket = desk.get(portalAnswer[1]!) ?? desk.byReference(portalAnswer[1]!);
+        if (!ticket?.question || !ticket.runId) {
+          json(res, 409, { error: "There is no question waiting on you right now." });
+          return;
+        }
+        const body = await readBody<{ answer?: string }>(req);
+        const answer = (body?.answer ?? "").trim();
+        if (!answer) {
+          json(res, 400, { error: "Please type an answer." });
+          return;
+        }
+        const session = registry.get(ticket.runId);
+        const ok = session?.answer(ticket.question.id, answer) ?? false;
+        json(res, ok ? 200 : 409, ok ? { ok: true } : { error: "That question has closed." });
+        return;
+      }
+
+      // The console's view of the desk: everything, including who reported it.
+      if (req.method === "GET" && path === "/api/desk") {
+        json(res, 200, { tickets: desk.list() });
+        return;
+      }
+
+      if (req.method === "GET" && path === "/api/desk/events") {
+        streamDesk(res);
         return;
       }
 
@@ -467,6 +718,62 @@ export async function startServer(
         server.close(() => resolve());
       }),
   };
+}
+
+/**
+ * Stream one ticket to the person who reported it.
+ *
+ * Only `userView` ever goes down this pipe. The portal has no way to reach a
+ * run, a command or an audit entry, because nothing here can send one.
+ */
+function streamPortalTicket(res: ServerResponse, idOrReference: string): void {
+  const ticket = desk.get(idOrReference) ?? desk.byReference(idOrReference);
+  if (!ticket) {
+    json(res, 404, { error: "We cannot find a report with that reference." });
+    return;
+  }
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+
+  const send = (t: DeskTicket) => res.write(`data: ${JSON.stringify(userView(t))}\n\n`);
+  send(ticket);
+
+  const unsubscribe = desk.subscribe((event) => {
+    if (event.ticket.id !== ticket.id) return;
+    send(event.ticket);
+  });
+  const keepAlive = setInterval(() => res.write(": keep-alive\n\n"), 20_000);
+  res.on("close", () => {
+    clearInterval(keepAlive);
+    unsubscribe();
+  });
+}
+
+/** Stream the whole desk to the technician console. */
+function streamDesk(res: ServerResponse): void {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+
+  for (const ticket of desk.list()) {
+    res.write(`data: ${JSON.stringify({ type: "ticket", ticket })}\n\n`);
+  }
+  const unsubscribe = desk.subscribe((event) => {
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  });
+  const keepAlive = setInterval(() => res.write(": keep-alive\n\n"), 20_000);
+  res.on("close", () => {
+    clearInterval(keepAlive);
+    unsubscribe();
+  });
 }
 
 /**

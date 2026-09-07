@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IT Support — report a problem</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23047857'/%3E%3Ctext x='16' y='22' font-family='system-ui,sans-serif' font-size='15' font-weight='700' fill='white' text-anchor='middle'%3E?%3C/text%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#f4f6f8; --panel:#fff; --ink:#111827; --muted:#5b6b82; --line:#e3e8ef;
+    --accent:#047857; --accent-ink:#fff;
+    --ok:#036c46; --ok-bg:#e8f7f0; --ok-line:#9fe0c3;
+    --wait:#8a4b06; --wait-bg:#fdf5e6; --wait-line:#f0c67a;
+    --radius:14px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0b1016; --panel:#151b23; --ink:#eef2f8; --muted:#94a3b8; --line:#232c38;
+      --accent:#34d399; --accent-ink:#06231a;
+      --ok:#6fe0ac; --ok-bg:#052419; --ok-line:#12523a;
+      --wait:#f6c66a; --wait-bg:#251a05; --wait-line:#5c4413;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:660px;margin:0 auto;padding:34px 20px 60px}
+  header{margin-bottom:26px}
+  h1{margin:0 0 6px;font-size:24px;letter-spacing:-.02em}
+  header p{margin:0;color:var(--muted);font-size:15px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:24px}
+  label{display:block;font-weight:600;font-size:14.5px;margin:0 0 6px}
+  .help{color:var(--muted);font-size:13.5px;margin:0 0 8px;font-weight:400}
+  input,textarea,select,button{font:inherit;width:100%;border-radius:10px;
+    border:1px solid var(--line);background:var(--bg);color:var(--ink);padding:11px 13px}
+  textarea{resize:vertical;line-height:1.55}
+  input:focus,textarea:focus,select:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .field+.field{margin-top:18px}
+  .consent{display:flex;gap:11px;align-items:flex-start;background:var(--bg);
+    border:1px solid var(--line);border-radius:10px;padding:13px 15px;margin-top:18px}
+  .consent input{width:18px;height:18px;flex:none;margin-top:2px;padding:0}
+  .consent div{font-size:14px;color:var(--muted)}
+  .consent b{color:var(--ink);display:block;margin-bottom:2px;font-size:14.5px}
+  button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);
+    font-weight:650;margin-top:22px;padding:13px}
+  button.primary:disabled{opacity:.55;cursor:progress}
+  .err{margin-top:14px;background:#fef3f2;border:1px solid #f2b3ad;color:#a01b12;
+    border-radius:10px;padding:11px 14px;font-size:14.5px}
+  @media (prefers-color-scheme:dark){.err{background:#2a100e;border-color:#6b2620;color:#ff9d95}}
+
+  /* tracking */
+  .ref{display:flex;justify-content:space-between;align-items:center;gap:14px;
+    flex-wrap:wrap;margin-bottom:18px}
+  .ref .n{font-family:ui-monospace,monospace;font-size:19px;font-weight:700}
+  .pill{font-size:13px;font-weight:650;padding:5px 13px;border-radius:999px;white-space:nowrap;
+    background:var(--bg);border:1px solid var(--line);color:var(--muted)}
+  .pill.ok{background:var(--ok-bg);border-color:var(--ok-line);color:var(--ok)}
+  .pill.wait{background:var(--wait-bg);border-color:var(--wait-line);color:var(--wait)}
+  .summary{color:var(--muted);font-size:14.5px;margin-bottom:20px}
+  ol.timeline{list-style:none;margin:0;padding:0}
+  ol.timeline li{position:relative;padding:0 0 20px 26px;font-size:15px}
+  ol.timeline li::before{content:"";position:absolute;left:3px;top:7px;width:9px;height:9px;
+    border-radius:50%;background:var(--accent)}
+  ol.timeline li::after{content:"";position:absolute;left:7px;top:19px;bottom:0;width:1px;
+    background:var(--line)}
+  ol.timeline li:last-child{padding-bottom:0}
+  ol.timeline li:last-child::after{display:none}
+  ol.timeline .t{color:var(--muted);font-size:12.5px;margin-top:3px}
+  .ask{margin-top:22px;border:2px solid var(--accent);border-radius:12px;padding:17px 18px;
+    background:var(--bg)}
+  .ask h3{margin:0 0 4px;font-size:15px;color:var(--accent)}
+  .ask .q{margin:0 0 13px;font-size:15.5px}
+  .ask .row{display:flex;gap:9px;flex-wrap:wrap}
+  .ask input{flex:1;min-width:220px}
+  .ask button{width:auto;padding:11px 20px;background:var(--accent);
+    border-color:var(--accent);color:var(--accent-ink);font-weight:650}
+  .reply{margin-top:22px;background:var(--ok-bg);border:1px solid var(--ok-line);
+    border-radius:12px;padding:17px 19px;white-space:pre-wrap;font-size:15.5px}
+  .reply h3{margin:0 0 8px;font-size:13px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--ok)}
+  .again{margin-top:24px;text-align:center}
+  .again button{width:auto;padding:10px 20px;background:transparent;color:var(--muted)}
+  footer{margin-top:28px;text-align:center;color:var(--muted);font-size:13px}
+  .spin{display:inline-block;width:13px;height:13px;border:2px solid var(--line);
+    border-top-color:var(--accent);border-radius:50%;animation:s .7s linear infinite;
+    vertical-align:-2px;margin-right:7px}
+  @keyframes s{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>IT Support</h1>
+    <p>Tell us what's going wrong and we'll take a look straight away.</p>
+  </header>
+
+  <div class="card" id="form">
+    <div class="field">
+      <label for="desc">What's the problem?</label>
+      <p class="help">In your own words — what you were doing, what happened, and when it started.</p>
+      <textarea id="desc" rows="6"
+        placeholder="The intranet page won't load — it just says the site can't be reached. It started this morning. Everything else seems fine, I can get to Google."></textarea>
+    </div>
+
+    <div class="field">
+      <label for="name">Your name</label>
+      <input id="name" placeholder="Priya Raman" autocomplete="name">
+    </div>
+
+    <div class="field">
+      <label for="target">Which machine is this about?</label>
+      <select id="target"></select>
+    </div>
+
+    <div class="consent">
+      <input type="checkbox" id="consent" checked>
+      <div>
+        <b>I'm happy for IT to run checks on my machine</b>
+        Only read-only checks run without asking. Anything that would change your
+        machine is shown to a technician first, and we'll never touch passwords,
+        payments or your files.
+      </div>
+    </div>
+
+    <button class="primary" id="submit">Send it to IT</button>
+    <div id="err"></div>
+  </div>
+
+  <div class="card" id="track" hidden>
+    <div class="ref">
+      <span class="n" id="ref"></span>
+      <span class="pill" id="status"></span>
+    </div>
+    <div class="summary" id="summary"></div>
+    <ol class="timeline" id="timeline"></ol>
+    <div id="ask"></div>
+    <div id="reply"></div>
+    <div class="again"><button id="another">Report something else</button></div>
+  </div>
+
+  <footer>Handled by AIT · your reference is saved in this browser</footer>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
+  ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+const time = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+let source = null;
+
+/* ---------------- targets ---------------- */
+
+async function loadTargets() {
+  try {
+    const { targets } = await (await fetch("/api/scenarios")).json();
+    const sel = $("target");
+    for (const t of targets ?? []) {
+      // The user picks a machine, not a simulation. Labels stay plain.
+      const label = t.key === "this-machine" ? "The machine I'm using now" : t.label;
+      sel.append(new Option(label, t.key));
+    }
+  } catch {
+    $("target").append(new Option("The machine I'm using now", "this-machine"));
+  }
+}
+
+/* ---------------- submitting ---------------- */
+
+$("submit").addEventListener("click", async () => {
+  const description = $("desc").value.trim();
+  $("err").innerHTML = "";
+  if (description.length < 10) {
+    $("err").innerHTML = `<div class="err">Tell us a little more so we know where to start.</div>`;
+    $("desc").focus();
+    return;
+  }
+
+  const btn = $("submit");
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spin"></span>Sending…`;
+
+  try {
+    const res = await fetch("/api/portal/tickets", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        description,
+        reportedBy: $("name").value.trim(),
+        target: $("target").value,
+        consent: $("consent").checked,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? "We couldn't send that just now.");
+    localStorage.setItem("ait.reference", data.ticket.reference);
+    show(data.ticket);
+    watch(data.ticket.reference);
+  } catch (err) {
+    $("err").innerHTML = `<div class="err">${esc(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Send it to IT";
+  }
+});
+
+$("another").addEventListener("click", () => {
+  if (source) { source.close(); source = null; }
+  localStorage.removeItem("ait.reference");
+  $("desc").value = "";
+  $("track").hidden = true;
+  $("form").hidden = false;
+  $("desc").focus();
+});
+
+/* ---------------- tracking ---------------- */
+
+function watch(reference) {
+  if (source) source.close();
+  source = new EventSource(`/api/portal/tickets/${encodeURIComponent(reference)}/events`);
+  source.onmessage = (e) => {
+    try { show(JSON.parse(e.data)); } catch { /* ignore a malformed frame */ }
+  };
+}
+
+function show(ticket) {
+  $("form").hidden = true;
+  $("track").hidden = false;
+  $("ref").textContent = ticket.reference;
+  $("summary").textContent = ticket.summary;
+
+  const pill = $("status");
+  pill.textContent = ticket.statusLabel;
+  pill.className = "pill" +
+    (ticket.status === "resolved" ? " ok" :
+     ticket.status === "waiting-on-you" ? " wait" : "");
+
+  $("timeline").innerHTML = ticket.updates.map((u) =>
+    `<li>${esc(u.text)}<div class="t">${esc(time(u.at))}</div></li>`).join("");
+
+  $("ask").innerHTML = ticket.question
+    ? `<div class="ask">
+         <h3>One quick question</h3>
+         <p class="q">${esc(ticket.question.question)}</p>
+         <div class="row">
+           <input id="answer" placeholder="Type your answer…" autocomplete="off">
+           <button id="sendAnswer">Send</button>
+         </div>
+       </div>`
+    : "";
+
+  if (ticket.question) {
+    const send = async () => {
+      const answer = $("answer").value.trim();
+      if (!answer) return;
+      $("answer").disabled = true;
+      $("sendAnswer").disabled = true;
+      await fetch(`/api/portal/tickets/${encodeURIComponent(ticket.reference)}/answer`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answer }),
+      });
+    };
+    $("sendAnswer").addEventListener("click", send);
+    $("answer").addEventListener("keydown", (e) => { if (e.key === "Enter") send(); });
+    $("answer").focus();
+  }
+
+  $("reply").innerHTML = ticket.reply
+    ? `<div class="reply"><h3>From IT</h3>${esc(ticket.reply)}</div>` : "";
+}
+
+/* ---------------- come back to an open report ---------------- */
+
+(async () => {
+  await loadTargets();
+  const saved = localStorage.getItem("ait.reference");
+  if (!saved) return;
+  try {
+    const res = await fetch(`/api/portal/tickets/${encodeURIComponent(saved)}`);
+    if (!res.ok) { localStorage.removeItem("ait.reference"); return; }
+    const { ticket } = await res.json();
+    show(ticket);
+    watch(saved);
+  } catch {
+    localStorage.removeItem("ait.reference");
+  }
+})();
+</script>
+</body>
+</html>

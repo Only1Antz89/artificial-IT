@@ -205,17 +205,52 @@
   .qrow .s{flex:1;min-width:0}
   .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;
     padding:16px 17px;border-bottom:1px solid var(--line)}
+
+  .portal-link{margin-left:14px;font-size:12.5px;color:var(--accent);text-decoration:none;
+    border:1px solid var(--line);padding:5px 11px;border-radius:999px}
+  .portal-link:hover{border-color:var(--accent)}
+  .count{background:var(--accent);color:var(--accent-ink);border-radius:999px;
+    padding:1px 8px;font-size:11px;margin-left:6px}
+  .count:empty{display:none}
+  .inbox{max-height:300px;overflow-y:auto}
+  .inbox .none{padding:20px 16px;color:var(--muted);font-size:12.5px;text-align:center}
+  .inbox .none a{color:var(--accent)}
+  .tk{width:100%;text-align:left;background:transparent;border:0;border-bottom:1px solid var(--line);
+    padding:12px 16px;cursor:pointer;display:block}
+  .tk:hover{background:var(--panel-2)}
+  .tk.active{background:var(--panel-2);box-shadow:inset 3px 0 0 var(--accent)}
+  .tk .s{font-weight:600;font-size:13px;line-height:1.4;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .tk .m{color:var(--muted);font-size:11.5px;margin-top:4px;display:flex;gap:7px;
+    align-items:center;flex-wrap:wrap}
+  .tk .badge{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:999px;
+    background:var(--panel);border:1px solid var(--line)}
+  .tk .badge.working{background:var(--warn-bg);color:var(--warn);border-color:var(--warn-line)}
+  .tk .badge.resolved{background:var(--ok-bg);color:var(--ok);border-color:var(--ok-line)}
+  .tk .badge.escalated{background:var(--warn-bg);color:var(--warn);border-color:var(--warn-line)}
+  .tk .badge.you{background:var(--stop-bg);color:var(--stop);border-color:var(--stop-line)}
 </style>
 </head>
 <body>
 
 <header>
   <div class="brand">AIT <span>— technician console</span></div>
+  <a class="portal-link" href="/portal" target="_blank" rel="noopener">User portal ↗</a>
   <div class="chips" id="providerChips"><span class="chip">checking providers…</span></div>
 </header>
 
 <div class="layout">
   <aside>
+    <section class="card">
+      <h2>Inbox <span id="inboxCount" class="count"></span></h2>
+      <div class="body" style="padding:0">
+        <div id="inbox" class="inbox">
+          <div class="none">Nothing reported yet. Open the
+            <a href="/portal" target="_blank" rel="noopener">user portal</a> and send one in.</div>
+        </div>
+      </div>
+    </section>
+
     <section class="card">
       <h2>Work a ticket</h2>
       <div class="body">
@@ -430,6 +465,9 @@ $("run").addEventListener("click", async () => {
   }
 
   btn.disabled = true; btn.textContent = "Running…";
+  // A technician who starts their own run is no longer following the inbox.
+  watching = null;
+  renderInbox();
   if (source) { source.close(); source = null; }
 
   $("stage").innerHTML = `
@@ -902,10 +940,108 @@ function renderQueue(data) {
     </div>`;
 }
 
+/* ---------------- inbox: tickets arriving from the portal ---------------- */
+
+const inbox = new Map();
+let watching = null;
+
+const BADGE = {
+  submitted: ["", "new"],
+  working: ["working", "working"],
+  "waiting-on-you": ["you", "waiting on user"],
+  "waiting-on-technician": ["you", "needs you"],
+  resolved: ["resolved", "resolved"],
+  escalated: ["escalated", "escalated"],
+  failed: ["you", "failed"],
+};
+
+function watchDesk() {
+  const source = new EventSource("/api/desk/events");
+  source.onmessage = (e) => {
+    let ev;
+    try { ev = JSON.parse(e.data); } catch { return; }
+    if (ev.type !== "ticket") return;
+    const settled = ["resolved", "escalated", "failed"].includes(ev.ticket.status);
+    const wasSettled = ["resolved", "escalated", "failed"].includes(
+      inbox.get(ev.ticket.id)?.status ?? "",
+    );
+    inbox.set(ev.ticket.id, ev.ticket);
+    renderInbox();
+
+    // A ticket that settles anywhere may have taught it something, even one the
+    // technician was not watching at the time.
+    if (settled && !wasSettled) loadKnowledge();
+
+    // Follow whatever came in most recently, unless a technician is already
+    // reading something else - a console that jumps around mid-read is worse
+    // than one that waits to be told.
+    if (!watching && ev.ticket.runId) openTicket(ev.ticket);
+    else if (watching === ev.ticket.id && ev.ticket.runId && currentRun !== ev.ticket.runId) {
+      openTicket(ev.ticket);
+    }
+  };
+}
+
+function renderInbox() {
+  const tickets = [...inbox.values()].sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+  const open = tickets.filter((t) => t.status !== "resolved").length;
+  $("inboxCount").textContent = open ? String(open) : "";
+
+  if (!tickets.length) return;
+
+  $("inbox").innerHTML = tickets.map((t) => {
+    const [cls, label] = BADGE[t.status] ?? ["", t.status];
+    return `<button class="tk ${watching === t.id ? "active" : ""}" data-ticket="${esc(t.id)}">
+      <div class="s">${esc(t.summary)}</div>
+      <div class="m">
+        <span class="badge ${cls}">${esc(label)}</span>
+        <span>${esc(t.reference)}</span>
+        <span>· ${esc(t.reportedBy)}</span>
+      </div>
+    </button>`;
+  }).join("");
+
+  for (const btn of $("inbox").querySelectorAll("[data-ticket]")) {
+    btn.addEventListener("click", () => {
+      const ticket = inbox.get(btn.getAttribute("data-ticket"));
+      if (ticket) openTicket(ticket, true);
+    });
+  }
+}
+
+/** Attach the console to the run working a reported ticket. */
+function openTicket(ticket, manual = false) {
+  if (!ticket.runId) return;
+  if (watching === ticket.id && currentRun === ticket.runId && !manual) return;
+
+  watching = ticket.id;
+  currentRun = ticket.runId;
+  renderInbox();
+
+  if (source) { source.close(); source = null; }
+
+  $("stage").innerHTML = `
+    <div class="runhead">
+      <div><div class="t">${esc(ticket.summary)}</div>
+      <div class="d">${esc(ticket.reference)} · reported by ${esc(ticket.reportedBy)} ·
+        ${ticket.consentGranted ? "consented to checks on their machine" : "no consent given — no device work"}</div></div>
+      <span class="status running" id="statusPill">${esc(ticket.status)}</span>
+    </div>
+    <div class="reply" style="margin:15px 17px">${esc(ticket.description)}</div>
+    <div id="hostbar"></div>
+    <ol class="feed" id="feed"></ol>
+    <div id="panels" class="panels"></div>`;
+
+  // The run's stream replays from the start, so a technician who opens a
+  // ticket late still sees the whole thing.
+  listen(ticket.runId, $("run"));
+}
+
 setMode(true);
 loadProviders();
 loadScenarios();
 loadKnowledge();
+watchDesk();
 </script>
 </body>
 </html>

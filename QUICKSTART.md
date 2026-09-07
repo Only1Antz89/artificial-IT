@@ -65,9 +65,34 @@ Open **http://localhost:3000**.
 
 ---
 
-## Running it live
+## Two windows
 
-The console opens on **Type one now**. There is no fixture behind it: whatever
+Open both, side by side:
+
+- **http://localhost:3000/portal** — what a colleague with a problem sees.
+- **http://localhost:3000** — what your technicians see.
+
+The strongest thing you can do in this demo is hand the portal to someone in the
+room. They describe their problem in their own words and press send; everyone
+else watches it land in the technician inbox and get worked.
+
+What the user sees is deliberately thin: progress in plain language, any question
+AIT needs answered, and the reply. No commands, no rule names, no audit trail.
+That split is enforced in code by an allowlist, not by styling — worth saying
+out loud, because "the user won't see that" is usually a promise rather than a
+property.
+
+If AIT needs a detail, **the question appears in the portal**, not the console —
+it is the user's question. The technician sees the ticket marked *waiting on
+user* and can still answer on their behalf, as they would on the phone.
+
+When a change needs approving, the user is told *"a technician is checking
+before we change anything"* rather than left on a silent pause. If nobody
+answers within two minutes it escalates properly rather than hanging.
+
+## Running it from the technician side
+
+The console also opens on **Type one now**. There is no fixture behind it: whatever
 you type goes to the configured brain, and the same guardrails, approval gate
 and write-up apply.
 

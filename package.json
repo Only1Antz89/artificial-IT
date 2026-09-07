@@ -11,7 +11,7 @@
     "ait": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && mkdir -p dist/src/server/console && cp src/server/console/index.html dist/src/server/console/index.html",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/src/server/console dist/src/server/portal && cp src/server/console/index.html dist/src/server/console/index.html && cp src/server/portal/index.html dist/src/server/portal/index.html",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "doctor": "tsx src/cli.ts doctor",
     "demo": "tsx src/cli.ts demo",
