@@ -93,9 +93,25 @@ These are real, and stated plainly rather than left for someone to discover:
   and read back as context. A poisoned entry could mislead a diagnosis. Entries
   are plain JSONL, reviewable and deletable, and they cannot widen policy.
 
-- **`MeshCentralSession` is a boundary, not a transport.** It throws rather than
-  returning empty output, because a run that appears successful while touching
-  nothing is worse than an error.
+- **Remote sessions run commands through an interactive shell.** `exec` bounds a
+  command's output with a sentinel; a command that deliberately printed the
+  sentinel followed by digits could misreport its own exit code. It cannot
+  escape the policy engine that way — the command still had to be cleared to run
+  at all — but treat remote exit codes as reported, not proven.
+
+- **TLS verification is never disabled**, in any code path. MeshCentral installs
+  commonly use a private CA; trust it via `NODE_EXTRA_CA_CERTS` rather than
+  weakening verification.
+
+- **The console has no authentication.** It is a local operator tool that binds
+  a port and exposes run control, approvals and evidence to anyone who can reach
+  it. Bind it to loopback, or put an authenticating proxy in front, before it
+  goes anywhere shared. Evidence paths are confined to the evidence directory,
+  but that is path-traversal defence, not access control.
+
+- **Approvals are held in memory.** A restart drops pending approvals and every
+  run's history. That is the right trade for a console you watch while it
+  happens, and the wrong one for a durable work queue.
 
 - **The offline brain is not a safety feature.** It is a deterministic stand-in
   for demos and tests. It deliberately proposes what users literally ask for —

@@ -19,6 +19,24 @@ export class EvidenceStore {
     mkdirSync(this.dir, { recursive: true });
   }
 
+  /** Persist a binary artefact (a PNG screen capture) and describe it. */
+  putBinary(
+    filename: string,
+    content: Buffer,
+    contentType: string,
+    caption?: string,
+  ): ArtifactRef {
+    const path = join(this.dir, filename);
+    writeFileSync(path, content);
+    return {
+      uri: `file://${path}`,
+      content_type: contentType,
+      sha256: createHash("sha256").update(content).digest("hex"),
+      size_bytes: content.byteLength,
+      ...(caption ? { caption } : {}),
+    };
+  }
+
   /** Persist a text artefact (SVG, log capture, transcript) and describe it. */
   put(
     filename: string,

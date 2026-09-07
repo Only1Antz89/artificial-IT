@@ -152,15 +152,52 @@ describe("simulated sessions behave like sessions", () => {
 });
 
 describe("real sessions fail loudly rather than silently", () => {
-  it("a local session cannot capture a screen", async () => {
+  it("a local session reports why it cannot capture, rather than faking a frame", async () => {
     const session = new LocalDeviceSession(WIN_LAPTOP);
-    await expect(session.capture()).rejects.toThrow(/not available/i);
+    const caps = await session.capabilities();
+
+    if (caps.canCapture) {
+      // A machine with a display really does produce a frame.
+      const capture = await session.capture();
+      expect(capture.source).toBe("screen-capture");
+      expect(capture.png).toBeTruthy();
+    } else {
+      // A headless one says so in words a technician can act on - it never
+      // returns an empty or black frame.
+      expect(caps.captureUnavailableReason).toBeTruthy();
+      await expect(session.capture()).rejects.toThrow(/cannot capture the screen/i);
+    }
   });
 
-  it("an unwired MeshCentral session says so instead of returning nothing", async () => {
+  it("probes what the host actually has instead of assuming", async () => {
+    const caps = await new LocalDeviceSession({ ...WIN_LAPTOP, platform: "linux" }).capabilities();
+    // Something universal must be found, or the probe itself is broken.
+    expect(caps.availableCommands).toContain("ls");
+    // And it must not claim tools this container does not have.
+    const { execSync } = await import("node:child_process");
+    const hasPing = (() => {
+      try {
+        execSync("which ping", { stdio: "ignore" });
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    expect(caps.availableCommands.includes("ping")).toBe(hasPing);
+  });
+
+  it("a MeshCentral session that cannot reach its server says why", async () => {
+    // Nothing is listening on port 1, so this exercises the connection-failure
+    // path rather than the protocol. The full protocol is covered against a
+    // stub server in tests/meshcentral.test.ts.
     const session = new MeshCentralSession(
       WIN_LAPTOP,
-      { serverUrl: "https://mesh.test", operatorToken: "t", meshId: "m" },
+      {
+        serverUrl: "http://127.0.0.1:1",
+        operatorToken: "t",
+        meshId: "m",
+        connectTimeoutMs: 1_000,
+      },
       {
         tenant_id: "t",
         task_id: "k",
@@ -170,8 +207,8 @@ describe("real sessions fail loudly rather than silently", () => {
         requested_at: new Date().toISOString(),
       },
     );
-    await expect(session.exec("ipconfig /all")).rejects.toThrow(/not wired up/i);
-    expect(session.status).toBe("failed");
+    // The error names what to check, rather than surfacing a bare socket error.
+    await expect(session.exec("ipconfig /all")).rejects.toThrow(/reachable|token|CA/i);
   });
 
   it("a local session runs without a shell, so it cannot chain commands", async () => {

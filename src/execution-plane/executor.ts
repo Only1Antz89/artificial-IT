@@ -131,13 +131,27 @@ async function runScreenshot(
   const annotations = (step.payload["annotations"] as Annotation[] | undefined) ?? [];
   const caption = String(step.payload["caption"] ?? step.intent);
 
-  const raw = ctx.evidence.put(
-    `${step.id}-screen.svg`,
-    capture.svg,
-    "image/svg+xml",
-    capture.description,
-  );
-  const artifacts = [raw];
+  // The raw frame is kept in whatever form it arrived in: PNG bytes for a real
+  // capture, SVG markup for a rendered one. Converting either way would mean
+  // the ticket no longer carries what the device actually produced.
+  const artifacts =
+    capture.source === "screen-capture" && capture.png
+      ? [
+          ctx.evidence.putBinary(
+            `${step.id}-screen.png`,
+            Buffer.from(capture.png, "base64"),
+            "image/png",
+            capture.description,
+          ),
+        ]
+      : [
+          ctx.evidence.put(
+            `${step.id}-screen.svg`,
+            capture.svg ?? "",
+            "image/svg+xml",
+            capture.description,
+          ),
+        ];
 
   if (annotations.length > 0) {
     const annotated = annotate(capture, annotations, caption);

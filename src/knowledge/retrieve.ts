@@ -43,6 +43,12 @@ const STOPWORDS = new Set([
   "urgent", "sorry", "hey", "team", "ticket", "request", "please", "kind",
   "regards", "cheers", "attached", "screenshot", "machine", "laptop", "computer",
   "pc", "device",
+  // Indefinite pronouns, and the forms the stemmer leaves behind. Without these
+  // "is something wrong?" matches every ticket that ever said "anything".
+  "something", "anything", "nothing", "everything", "someone", "anyone",
+  "everyone", "somebody", "anybody", "nobody", "someth", "anyth", "noth",
+  "everyth", "somewhere", "anywhere", "sure", "bit", "over", "tell", "right",
+  "specific", "attention", "feel", "doesn", "isn", "wasn", "couldn", "wouldn",
 ]);
 
 /**

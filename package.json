@@ -18,7 +18,9 @@
     "serve": "tsx src/server/index.ts",
     "cli": "tsx src/cli.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "local": "tsx src/cli.ts local",
+    "providers": "tsx src/cli.ts providers"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",
@@ -29,6 +31,8 @@
     "@types/node": "^22.10.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "ws": "^8.18.0",
+    "@types/ws": "^8.5.13"
   }
 }

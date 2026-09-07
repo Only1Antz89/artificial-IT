@@ -85,11 +85,22 @@ export async function runTicket(options: RunOptions): Promise<Run> {
   const results: StepResult[] = [];
   const proposed: PlanStep[] = [];
 
+  // Probe the machine once, up front. Everything downstream reasons about what
+  // this host actually has rather than what its platform usually has.
+  const capabilities = session ? await session.capabilities() : undefined;
+
   audit.record("run.started", "system", `Run started for ticket ${ticket.id}.`, {
     brain: brain.name,
     gate: gate.name,
     step_budget: stepBudget,
     device: ticket.device?.hostname ?? null,
+    capabilities: capabilities
+      ? {
+          platform: capabilities.platform,
+          tools: capabilities.availableCommands.length,
+          can_capture: capabilities.canCapture,
+        }
+      : null,
   });
 
   const emit = (event: RunEvent) => onEvent?.(event);
@@ -130,7 +141,12 @@ export async function runTicket(options: RunOptions): Promise<Run> {
   emit({ type: "knowledge", ticketIds: knowledge_used });
 
   // ---- 3. Diagnose ---------------------------------------------------------
-  const diagnosis = await brain.diagnose({ ticket, intake, priorTickets });
+  const diagnosis = await brain.diagnose({
+    ticket,
+    intake,
+    priorTickets,
+    ...(capabilities ? { capabilities } : {}),
+  });
   audit.record(
     "diagnosis.formed",
     "agent",
@@ -164,6 +180,7 @@ export async function runTicket(options: RunOptions): Promise<Run> {
       priorTickets,
       history: results,
       remainingBudget: stepBudget - executed,
+      ...(capabilities ? { capabilities } : {}),
     });
 
     if (proposal.root_cause) rootCause = proposal.root_cause;
@@ -333,6 +350,7 @@ export async function runTicket(options: RunOptions): Promise<Run> {
     history: results,
     resolved,
     escalated: escalation.triggered,
+    ...(capabilities ? { capabilities } : {}),
   });
   audit.record("run.finished", "agent", documentation.title, {
     resolved,

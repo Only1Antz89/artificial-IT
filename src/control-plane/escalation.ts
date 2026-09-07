@@ -72,7 +72,9 @@ export function assessEscalation(input: EscalationInput): Escalation {
   }
 
   // Work that stopped at the approval gate, in a run with no human attached.
-  if (results.some((r) => r.outcome === "awaiting_approval")) {
+  // Only when the run did not otherwise succeed: a resolved ticket that also
+  // skipped one optional gated check is finished, not escalated.
+  if (!resolved && results.some((r) => r.outcome === "awaiting_approval")) {
     triggers.add("requires-authority");
   }
 
@@ -82,7 +84,7 @@ export function assessEscalation(input: EscalationInput): Escalation {
 
   // Three or more failed executions means the approach is wrong, not unlucky.
   const failures = results.filter((r) => r.outcome === "failed").length;
-  if (failures >= 3) {
+  if (!resolved && failures >= 3) {
     triggers.add("repeated-failure");
   }
 

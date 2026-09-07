@@ -51,15 +51,15 @@ const ANNOTATIONS: Annotation[] = [
 describe("annotated captures", () => {
   it("produces a well-formed document from the browser screen", () => {
     const capture = browserScreen({ dns_cache_stale: true });
-    assertWellFormed(capture.svg);
+    assertWellFormed(capture.svg!);
     assertWellFormed(annotate(capture, ANNOTATIONS, "Browser error"));
   });
 
   it("escapes ampersands in the window title", () => {
     // "Printers & scanners" is exactly the case that broke this before.
     const capture = printQueueScreen({ spooler_running: false, queued_jobs: 4 });
-    expect(capture.svg).toContain("Printers &amp; scanners");
-    assertWellFormed(capture.svg);
+    expect(capture.svg!).toContain("Printers &amp; scanners");
+    assertWellFormed(capture.svg!);
     assertWellFormed(annotate(capture, ANNOTATIONS, "Print queue & jobs"));
   });
 

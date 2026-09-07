@@ -106,9 +106,31 @@ enforcement mechanism and must never become it.
 ### Execution plane — `src/execution-plane/`
 
 `DeviceSession` is the "hands": requested, consented to, used, ended, and
-attributable throughout. Three implementations — simulated, local, and a
-MeshCentral boundary. Sessions are deliberately dumb: the control plane decides,
-the session performs.
+attributable throughout. Three implementations — simulated, local, and
+MeshCentral. Sessions are deliberately dumb: the control plane decides, the
+session performs.
+
+Every session reports its own `capabilities()` rather than having them assumed
+from its platform. A stripped container has no `ping`; a headless host has no
+display. Proposing `dig` on a machine without `dig` wastes a step and produces a
+failure that looks like a fault, so the brain is told what is actually there.
+
+A `ScreenCapture` carries either real pixels (`source: "screen-capture"`, base64
+PNG) or a frame rendered from known state (`source: "rendered"`, SVG). The
+distinction is stamped onto the annotated image itself, because a technician
+reading a ticket must be able to tell whether they are looking at the user's
+screen or a diagram of it.
+
+`remote.ts` implements MeshCentral properly rather than describing it. The
+server offers no request/response API for running a command — it offers an
+interactive relay, so the client drives it the way a person would: open
+`control.ashx`, fetch the browser and agent cookies, ask the agent to dial into
+a relay id you invent, join the same relay, wait for `c`/`cr`, select protocol 1.
+From there it is a terminal, and a terminal has no end-of-output marker, so
+`exec` appends a sentinel echo and reads until the *expanded* form of it appears
+— not the echoed one, which arrives before the command has run at all. Commands
+are serialised through one shell: a terminal has one cursor, and two concurrent
+commands would interleave into output neither could be trusted from.
 
 `LocalDeviceSession` spawns with `shell: false` and an argv array, so a command
 *cannot* grow a second command through `;` or `&&`. The policy engine already
@@ -165,6 +187,30 @@ adding a sibling to `mapper.ts`, nothing more.
 `ZendeskClient` is an interface with an HTTP implementation and an in-memory
 one, so a demo run and a live run take the same code path through the agent.
 
+### Console — `src/server/`
+
+The batch console could await a run and render the result. A technician cannot:
+the whole point of the approval gate is that a person is asked *mid-run*, so the
+run has to be observable while it is still going and interruptible by a decision
+arriving from outside it.
+
+So `run-registry.ts` turns a run into a small state machine. Events accumulate
+and fan out to whoever is watching over SSE, and a pending approval is a promise
+held open until someone in a browser resolves it. Two details carry weight:
+
+- **The timeout denies.** If nobody answers, the safe default is no.
+- **Finishing a run answers everything outstanding.** A finished run must not
+  leave a promise dangling that could later act on a device.
+
+Replay is by history alone. A browser connecting mid-run receives every event so
+far; an approval still pending is simply one with no `approval-resolved` after
+it. Re-announcing pending approvals separately would render the same card twice
+and let a technician answer it twice.
+
+Evidence is served from a path taken off the request, so it is resolved and
+confined to the evidence directory. A console that hands back any path it is
+given is a file-disclosure bug with a nice UI on top.
+
 ## The loop
 
 `src/agent/loop.ts`, read top to bottom, is the whole product:
@@ -198,3 +244,6 @@ device work happens after the halt.
 - **A new device backend** — implement `DeviceSession`.
 - **A new reasoning provider** — implement `Brain` and add it to `selectBrain`.
   The guardrails apply unchanged, which is the point.
+- **A new local diagnostic** — add a `LocalCheck` in `local-playbooks.ts` with
+  the tool it needs and an interpreter for its output. It will be proposed only
+  on hosts that actually have that tool.

@@ -261,7 +261,17 @@ export interface RequestedAction {
   id: string;
   match: RegExp;
   intent: string;
+  /** Default command, used when no platform-specific one is given. */
   command: string;
+  /**
+   * Platform-specific form of the same request.
+   *
+   * These are never executed - every one of them is refused - but they are
+   * written correctly per platform anyway, because a technician reading the
+   * ticket should see the actual thing that was asked for and blocked, not a
+   * Windows command on a Mac.
+   */
+  platformCommands?: Partial<Record<"windows" | "macos" | "linux", string>>;
   rollback?: string;
 }
 
@@ -271,6 +281,33 @@ export const REQUESTED_ACTIONS: RequestedAction[] = [
     match: /\b(reset|change)\b[^\n]{0,30}\bpassword\b|\blocked out\b[^\n]{0,60}\bpassword\b/i,
     intent: "Reset the user's account password as they requested",
     command: "net user d.osei * /domain",
+    platformCommands: {
+      windows: "net user d.osei * /domain",
+      macos: "dscl . -passwd /Users/$USER",
+      linux: "passwd $USER",
+    },
+  },
+  {
+    id: "req.purge-home",
+    match: /\b(delete|remove|clear|clean)\b[^\n]{0,50}\b(home directory|everything|all files|temp files)\b/i,
+    intent: "Delete files under the user's home directory to reclaim space",
+    command: "rm -rf ~/*",
+    platformCommands: {
+      windows: "Remove-Item -Path $env:USERPROFILE\\* -Recurse -Force",
+      macos: "rm -rf ~/*",
+      linux: "rm -rf ~/*",
+    },
+  },
+  {
+    id: "req.disable-firewall",
+    match: /\b(turn off|disable|switch off|stop)\b[^\n]{0,30}\b(firewall|antivirus|defender|gatekeeper)\b/i,
+    intent: "Turn off the firewall so the user's dev server is not blocked",
+    command: "Disable the host firewall",
+    platformCommands: {
+      windows: "netsh advfirewall set allprofiles state off",
+      macos: "defaults write /Library/Preferences/com.apple.alf globalstate -int 0",
+      linux: "ufw disable",
+    },
   },
   {
     id: "req.create-account",

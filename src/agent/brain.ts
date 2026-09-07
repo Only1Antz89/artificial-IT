@@ -24,6 +24,7 @@ import type {
   Ticket,
 } from "../contracts/index.js";
 import type { RetrievalHit } from "../knowledge/index.js";
+import type { SessionCapabilities } from "../execution-plane/device.js";
 
 export interface IntakeInput {
   ticket: Ticket;
@@ -34,6 +35,8 @@ export interface DiagnoseInput {
   intake: Intake;
   /** Similar tickets already resolved, best match first. */
   priorTickets: RetrievalHit[];
+  /** What the attached machine can actually do, probed rather than assumed. */
+  capabilities?: SessionCapabilities;
 }
 
 export interface ProposeInput {
@@ -45,6 +48,13 @@ export interface ProposeInput {
   history: StepResult[];
   /** How many steps the loop will still allow. */
   remainingBudget: number;
+  /**
+   * What the attached machine can actually do.
+   *
+   * Proposing `dig` on a host without `dig` wastes a step and produces a
+   * failure that looks like a fault. The brain is told what is there.
+   */
+  capabilities?: SessionCapabilities;
 }
 
 export interface ProposeOutput {
@@ -66,6 +76,7 @@ export interface DocumentInput {
   history: StepResult[];
   resolved: boolean;
   escalated: boolean;
+  capabilities?: SessionCapabilities;
 }
 
 export interface Brain {

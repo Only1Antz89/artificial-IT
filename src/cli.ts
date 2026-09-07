@@ -19,6 +19,9 @@ import { newId } from "./contracts/index.js";
 import type { RunEvent } from "./agent/loop.js";
 import type { Scenario } from "./demo/scenarios.js";
 import type { ProviderName } from "./agent/select-brain.js";
+import { LOCAL_SCENARIOS, runLocal, type LocalScenarioKey } from "./demo/run-local.js";
+import { selectBrain } from "./agent/select-brain.js";
+import { checkClaudeModel, checkOpenAIModel, withTimeout } from "./agent/model-check.js";
 
 const c = {
   dim: (s: string) => `\x1b[2m${s}\x1b[0m`,
@@ -146,9 +149,123 @@ async function cmdDemo(args: string[]): Promise<void> {
   console.log(c.dim(`   evidence written to ./run-artifacts\n`));
 }
 
+/** Run against the machine this process is on. */
+async function cmdLocal(args: string[]): Promise<void> {
+  const provider = readFlag(args, "--provider") as ProviderName | undefined;
+  const positional = args.filter((a) => !a.startsWith("-"));
+  const scenario = (positional[0] ?? "local-health") as LocalScenarioKey;
+
+  if (!LOCAL_SCENARIOS.some((s) => s.key === scenario)) {
+    console.error(
+      `Unknown local scenario "${scenario}". Try: ${LOCAL_SCENARIOS.map((s) => s.key).join(", ")}`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const meta = LOCAL_SCENARIOS.find((s) => s.key === scenario)!;
+  console.log(`\n${c.bold("AIT — running against this machine")}`);
+  console.log(c.dim(`  ${meta.demonstrates}\n`));
+
+  const { run, selection, capabilities, ticket } = await runLocal({
+    scenario,
+    ...(provider ? { provider } : {}),
+    onEvent: (event) => printEvent({ key: scenario } as Scenario, event),
+  });
+
+  console.log(
+    `\n  ${c.dim("host")}       ${ticket.device?.hostname} (${capabilities.platform}) · ${capabilities.availableCommands.length} diagnostic tools found`,
+  );
+  if (!capabilities.canCapture) {
+    console.log(`  ${c.dim("screen")}     not capturable: ${capabilities.captureUnavailableReason}`);
+  }
+  console.log(`  ${c.dim("provider")}   ${selection.provider} (${selection.model})`);
+  console.log(
+    `  ${c.dim("outcome")}    ${run.status === "resolved" ? c.green(run.status) : c.yellow(run.status)} · ${run.results.length} step(s)`,
+  );
+
+  const blocked = run.results.filter((r) => r.outcome === "blocked");
+  if (blocked.length > 0) {
+    console.log(`\n  ${c.bold("Refused on this machine")}`);
+    for (const b of blocked) {
+      console.log(`    ${c.red("⛔")} ${b.step.intent}`);
+      console.log(`       ${c.dim(String(b.step.payload["command"] ?? ""))}`);
+      console.log(`       ${c.dim(b.verdict.rule_id)}`);
+    }
+  }
+
+  const changed = run.results.filter((r) => r.outcome === "success" && r.step.mutating);
+  console.log(
+    `\n  ${changed.length === 0 ? c.green("Nothing on this machine was changed.") : c.yellow(`${changed.length} change(s) applied.`)}`,
+  );
+
+  if (run.documentation) {
+    console.log(`\n  ${c.bold("Reply to user")}`);
+    for (const line of wrap(run.documentation.user_reply, 76)) console.log(`    ${line}`);
+  }
+  console.log("");
+}
+
+/** Report which providers are configured, and whether their models exist. */
+async function cmdProviders(): Promise<void> {
+  console.log(`\n${c.bold("Reasoning providers")}\n`);
+
+  const rows: [string, string, string][] = [];
+
+  for (const provider of ["claude", "openai"] as const) {
+    let selection;
+    try {
+      selection = selectBrain(provider);
+    } catch (err) {
+      rows.push([provider, c.dim("not configured"), err instanceof Error ? err.message : ""]);
+      continue;
+    }
+
+    const check = await withTimeout(
+      provider === "claude"
+        ? checkClaudeModel(selection.model)
+        : checkOpenAIModel(selection.model),
+      {
+        ok: true,
+        model: selection.model,
+        skipped: "timed out",
+        message: "Model list did not respond in time.",
+      },
+    );
+
+    const state = check.skipped
+      ? c.yellow("unverified")
+      : check.ok
+        ? c.green("ready")
+        : c.red("model not found");
+    rows.push([provider, state, check.message]);
+  }
+
+  const offline = selectBrain("offline");
+  rows.push(["offline", c.green("ready"), `${offline.model} - deterministic, no network`]);
+
+  for (const [name, state, detail] of rows) {
+    console.log(`  ${c.bold(name.padEnd(9))} ${state}`);
+    for (const line of wrap(detail, 68)) console.log(`  ${" ".repeat(9)} ${c.dim(line)}`);
+    console.log("");
+  }
+
+  const active = selectBrain();
+  console.log(`  ${c.dim("auto would choose:")} ${c.bold(active.provider)} (${active.model})\n`);
+}
+
 function cmdScenarios(): void {
   console.log(`\n${c.bold("Demo scenarios")}\n`);
   for (const s of SCENARIOS) {
+    console.log(`  ${c.bold(s.key.padEnd(16))} ${s.title}`);
+    for (const line of wrap(s.demonstrates, 70)) {
+      console.log(`  ${" ".repeat(16)} ${c.dim(line)}`);
+    }
+    console.log("");
+  }
+
+  console.log(`${c.bold("Against this machine")} ${c.dim("(ait local <key>)")}\n`);
+  for (const s of LOCAL_SCENARIOS) {
     console.log(`  ${c.bold(s.key.padEnd(16))} ${s.title}`);
     for (const line of wrap(s.demonstrates, 70)) {
       console.log(`  ${" ".repeat(16)} ${c.dim(line)}`);
@@ -226,9 +343,11 @@ function usage(): void {
   console.log(`
 ${c.bold("AIT")} — AI IT technician
 
-  ait demo [scenario...]      run the demo (all scenarios by default)
+  ait demo [scenario...]      run the simulated demo (all scenarios by default)
+  ait local [scenario]        run against THIS machine (local-health | local-danger)
   ait demo --provider openai  force a reasoning provider (claude|openai|offline)
-  ait scenarios               list the demo scenarios
+  ait scenarios               list every scenario
+  ait providers               show which providers are configured and verified
   ait check "<command>"       ask the guardrails about a command without running it
   ait serve                   start the technician console on :3000
 
@@ -243,6 +362,12 @@ async function main(): Promise<void> {
   switch (command) {
     case "demo":
       await cmdDemo(args);
+      break;
+    case "local":
+      await cmdLocal(args);
+      break;
+    case "providers":
+      await cmdProviders();
       break;
     case "scenarios":
       cmdScenarios();

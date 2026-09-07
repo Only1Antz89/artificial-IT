@@ -11,11 +11,48 @@ not a prompt, and it does not consult the model.
 
 ```bash
 npm install
-npm run demo          # runs every scenario, no API key needed
 npm run serve         # technician console on http://localhost:3000
+npm run demo          # every simulated scenario, in the terminal
+npm run local         # run against THIS machine
 ```
 
+No API key needed for any of the above.
+
 ---
+
+## The console
+
+`npm run serve` opens a technician console. It is not a report of a finished
+run — the run streams into it live, and **when a step needs a technician's
+sign-off it stops and asks you, in the browser**. Approve it and the change
+reaches the device; decline it and the run escalates with the change un-made.
+
+It also carries the guardrail checker, so you can interrogate the policy engine
+from the same screen without a model in the loop.
+
+## Running against your own machine
+
+Everything else is simulated so it behaves the same everywhere. These two are
+not:
+
+```bash
+npm run local                    # "check my machine over"
+npm run local -- local-danger    # dangerous requests, aimed at your real box
+```
+
+`local-health` runs genuine read-only diagnostics — disk, memory, processes,
+name resolution — against real thresholds. On a healthy machine it reports
+healthy and changes nothing. There is no fixture making that happen.
+
+`local-danger` feeds a ticket asking to reset your password, delete your home
+directory and turn off your firewall, aimed at the machine you are sitting at,
+so you can watch nothing happen to it.
+
+The session probes what your host actually has before proposing anything — a
+container with no `ping` will not see `ping` proposed — and screen capture uses
+your platform's own tool (`screencapture`, PowerShell, `scrot`/`grim`/`maim`).
+On a headless host it says there is no display rather than attaching a black
+rectangle.
 
 ## What it does
 
@@ -30,6 +67,8 @@ npm run serve         # technician console on http://localhost:3000
 | Reads and updates Zendesk tickets | `src/integrations/zendesk/` |
 | Attaches annotated screenshots to tickets | `src/execution-plane/annotate.ts` |
 | Learns from previous tickets | `src/knowledge/` |
+| Live technician console with in-browser approvals | `src/server/` |
+| Remote device sessions over MeshCentral | `src/execution-plane/remote.ts` |
 
 ## The guardrails
 
@@ -102,7 +141,8 @@ Five scenarios, each exercising a different part of the system:
 ```bash
 npm run demo                    # all five
 npm run demo -- dns-outage      # just one
-npm run cli -- scenarios        # list them
+npm run cli -- scenarios        # list them, including the local ones
+npm run cli -- providers        # which providers are configured and verified
 ```
 
 | Scenario | What it shows |
@@ -176,20 +216,44 @@ MESHCENTRAL_TOKEN=...
 MESHCENTRAL_MESH_ID=...
 ```
 
-`HttpZendeskClient` is complete and talks to the Zendesk Support API v2.
-`MeshCentralSession` implements the boundary but not the relay transport — it
-throws a clear error rather than silently returning empty output, because a run
-that looks successful while touching nothing is the failure this codebase is
-arranged to prevent.
+`HttpZendeskClient` talks to the Zendesk Support API v2.
+
+`MeshCentralSession` is a working transport, not a stub. It opens the control
+channel, asks the agent to dial into a relay, completes the `c`/`cr` handshake
+and drives protocol 1 (terminal) — the same flow `meshctrl shell` uses. Commands
+are serialised through one shell and bounded by a sentinel, and remote screen
+capture runs the platform's own tool and reads the PNG back.
+
+TLS verification is never disabled. MeshCentral installs commonly use a private
+CA — point `NODE_EXTRA_CA_CERTS` at it.
+
+## Model verification
+
+Model names move faster than any codebase. Rather than trusting a hardcoded
+default, AIT asks the provider whether the configured model exists, once at
+startup, and names the ids that would work when it does not:
+
+```bash
+npm run cli -- providers
+```
+
+An inconclusive check (listing restricted by workspace policy, network down)
+does not block a run that would otherwise succeed — it is reported as
+`unverified` and the run proceeds.
 
 ## Development
 
 ```bash
-npm test          # 127 tests
+npm test          # 182 tests
 npm run typecheck
 npm run build
 ```
 
-The test suite leans hard on `tests/policy.test.ts` — 53 cases written as "what
-a user or an over-eager model would actually try". Those are the most important
+The suite leans hard on `tests/policy.test.ts` — 53 cases written as "what a
+user or an over-eager model would actually try". Those are the most important
 tests here; everything else is a convenience by comparison.
+
+`tests/meshcentral.test.ts` drives the client against a stub server speaking the
+real protocol, and `tests/server.test.ts` drives the console over real HTTP
+including the SSE stream and the approval round trip. `tests/local.test.ts` runs
+genuine commands on whatever host runs the suite.

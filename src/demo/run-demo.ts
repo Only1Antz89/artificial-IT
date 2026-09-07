@@ -8,7 +8,7 @@
  */
 import { mkdirSync, rmSync } from "node:fs";
 import { runTicket, type RunEvent } from "../agent/loop.js";
-import { selectBrain, type BrainSelection, type ProviderName } from "../agent/select-brain.js";
+import { selectBrainChecked, type BrainSelection, type ProviderName } from "../agent/select-brain.js";
 import { PolicyBoundGate } from "../control-plane/approvals.js";
 import type { Run } from "../contracts/index.js";
 import {
@@ -56,7 +56,7 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoSession> {
   }
   mkdirSync(workdir, { recursive: true });
 
-  const selection = selectBrain(options.provider);
+  const selection = await selectBrainChecked(options.provider);
   const zendesk = new InMemoryZendeskClient({ tickets: TICKETS, users: USERS });
   const knowledge = new KnowledgeStore(`${workdir}/knowledge.jsonl`);
   seedKnowledge(knowledge);

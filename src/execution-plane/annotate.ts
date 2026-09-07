@@ -69,9 +69,23 @@ export function annotate(
 ): string {
   const { width, height } = capture;
   const captionHeight = caption ? 44 : 0;
-  const inner = capture.svg
-    .replace(/^[\s\S]*?<svg[^>]*>/i, "")
-    .replace(/<\/svg>\s*$/i, "");
+
+  // A real capture is embedded as an image; a rendered frame is inlined so its
+  // vectors stay crisp. Either way the original is carried through untouched,
+  // so what the ticket shows is provably the frame that was captured.
+  const inner =
+    capture.source === "screen-capture" && capture.png
+      ? `<image x="0" y="0" width="${width}" height="${height}" href="data:image/png;base64,${capture.png}" preserveAspectRatio="none"/>`
+      : (capture.svg ?? "")
+          .replace(/^[\s\S]*?<svg[^>]*>/i, "")
+          .replace(/<\/svg>\s*$/i, "");
+
+  // Provenance stamp. A technician must be able to tell at a glance whether
+  // they are looking at the user's actual screen or a drawing of it.
+  const provenance =
+    capture.source === "screen-capture"
+      ? "Live screen capture"
+      : "Rendered from device state (not a photograph of the screen)";
 
   const marks = annotations
     .map((a, index) => {
@@ -113,6 +127,7 @@ ${lines
   <g class="caption">
     <rect x="0" y="${height}" width="${width}" height="${captionHeight}" fill="#101828"/>
     <text x="16" y="${height + 27}" font-family="system-ui, sans-serif" font-size="14" fill="#ffffff">${escapeXml(caption)}</text>
+    <text x="${width - 16}" y="${height + 27}" font-family="system-ui, sans-serif" font-size="11" fill="#98a2b3" text-anchor="end">${escapeXml(provenance)}</text>
   </g>`
     : "";
 

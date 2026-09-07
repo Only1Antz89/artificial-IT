@@ -79,7 +79,14 @@ export const BLOCKING_RULES: GuardrailRule[] = [
       /\b(useradd|userdel|adduser|deluser|dscl\s+\.\s+-create)\b/i,
       /\bnew-(aduser|localuser|msoluser|mguser)\b/i,
       /\bremove-(aduser|localuser|msoluser|mguser)\b/i,
-      /\b(create|delete|remove|provision|deprovision|disable|enable)\b[^\n]{0,30}\b(user|account|mailbox|tenant)s?\b/i,
+      // Tight gap on purpose. With a wide one, "delete files under the user's
+      // home directory" reads as an account deletion and gets headlined under
+      // the wrong category - it is destructive, not identity.
+      // Allows a determiner and any number of qualifiers ("the AD account",
+      // "a new local user account") while still refusing to span an unrelated
+      // noun phrase like "files under the user's home directory".
+      /\b(create|delete|remove|provision|deprovision|disable|enable)\s+(a|an|the|this|these|their|her|his|its)?\s*((new|ad|azure|entra|local|domain|admin|administrator|service|email|guest|test|starter|staff)\s+)*(user|account|mailbox|tenant)s?\b/i,
+      /\b(user|mailbox|tenant)\s+account\b[^\n]{0,20}\b(create|delete|remove|disable)/i,
     ],
     reason:
       "Creating, deleting or disabling user accounts is an identity-management change that requires a human technician with the right authority.",
@@ -152,6 +159,14 @@ export const BLOCKING_RULES: GuardrailRule[] = [
       /\bmanage-bde\b[^\n]*-off\b/i,
       /\bSet-ExecutionPolicy\b[^\n]*\bUnrestricted\b/i,
       /\bsetenforce\s+0\b/i,
+      // Firewall tools by name: their own names never contain "firewall", so
+      // the generic pattern above misses them entirely.
+      /\bufw\s+(disable|reset|--force\s+reset)\b/i,
+      /\bfirewall-cmd\b[^\n]*--(permanent\s+)?(remove|set-default-zone=trusted)/i,
+      /\biptables\s+(-F|--flush|-P\s+\w+\s+ACCEPT)\b/i,
+      /\bpfctl\s+-d\b/i,
+      /\bcom\.apple\.alf\b[^\n]*globalstate[^\n]*(-int\s+)?0\b/i,
+      /\bsystemctl\s+(stop|disable|mask)\s+(ufw|firewalld|clamav|apparmor)\b/i,
     ],
     reason:
       "Weakening or disabling a security control (antivirus, firewall, disk encryption, MFA) is never an acceptable automated fix.",
@@ -321,7 +336,7 @@ export const READ_ONLY_COMMANDS = new Set([
   // networking (read-only)
   "ping", "traceroute", "tracert", "nslookup", "dig", "host", "ipconfig",
   "ifconfig", "ip", "netstat", "ss", "arp", "route", "curl", "wget", "nc",
-  "networksetup", "scutil", "resolvectl", "speedtest", "mtr",
+  "networksetup", "scutil", "resolvectl", "speedtest", "mtr", "getent",
   // windows diagnostics
   // `sc` is read-only here only because `sc config|stop|start` is caught by
   // `approve.service-restart`, which is evaluated before this allowlist.

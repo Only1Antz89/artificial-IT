@@ -48,6 +48,11 @@ import {
 /**
  * Overridable via `OPENAI_MODEL`, because model names move faster than this
  * file does and a deployment should not need a code change to follow them.
+ *
+ * Unverified in any given account by design: `selectBrainChecked` asks the
+ * provider whether this id exists rather than trusting it, and names the ids
+ * that do work when it does not. A default that is merely plausible is worth
+ * having; a default that is silently wrong at request time is not.
  */
 export const DEFAULT_OPENAI_MODEL = "gpt-5";
 

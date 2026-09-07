@@ -57,6 +57,7 @@ export function browserScreen(state: DeviceState): ScreenCapture {
   <text x="450" y="366" font-family="system-ui, sans-serif" font-size="13" fill="#ffffff" text-anchor="middle">Reload</text>`;
 
   return {
+    source: "rendered",
     svg: chrome("Corp Intranet — Browser", body),
     width: W,
     height: H,
@@ -90,6 +91,7 @@ export function printQueueScreen(state: DeviceState): ScreenCapture {
   ${rows}`;
 
   return {
+    source: "rendered",
     svg: chrome("Printers & scanners — HP-LaserJet-4F", body),
     width: W,
     height: H,

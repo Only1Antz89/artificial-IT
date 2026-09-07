@@ -34,6 +34,7 @@ import {
   type Playbook,
   type PlaybookStep,
 } from "./playbooks.js";
+import { checksFor, type HostPlatform, type LocalCheck } from "./local-playbooks.js";
 
 /** Words in a ticket that mean the user cannot work right now. */
 const BLOCKED = /\b(cannot work|can'?t work|completely|nothing works|blocked|stuck|down|outage|deadline|urgent|asap|client\s+(meeting|call))\b/i;
@@ -88,7 +89,13 @@ export class HeuristicBrain implements Brain {
 
     // A close prior ticket is stronger evidence than a playbook pattern match,
     // so it leads and carries the prior's id.
-    const priorHypotheses = priorTickets.slice(0, 2).map((hit) => ({
+    // An entry whose root cause was never established has nothing to offer as a
+    // hypothesis - "the cause is unknown" is not a lead, it is noise.
+    const usablePriors = priorTickets.filter(
+      (hit) => !/^not established/i.test(hit.entry.root_cause),
+    );
+
+    const priorHypotheses = usablePriors.slice(0, 2).map((hit) => ({
       statement: `Same cause as ticket ${hit.entry.source_ticket_id}: ${hit.entry.root_cause}`,
       confidence: (hit.score > 3 ? "medium" : "low") as Confidence,
       supporting_evidence: [
@@ -121,7 +128,7 @@ export class HeuristicBrain implements Brain {
     return {
       hypotheses,
       leading_index: 0,
-      confidence: priorTickets.length > 0 ? "medium" : playbook ? "medium" : "low",
+      confidence: usablePriors.length > 0 ? "medium" : playbook ? "medium" : "low",
     };
   }
 
@@ -145,7 +152,12 @@ export class HeuristicBrain implements Brain {
           id: newId("step"),
           kind: "command" as const,
           intent: a.intent,
-          payload: { command: a.command, requested_action: a.id },
+          payload: {
+            command:
+              (platform !== "unknown" ? a.platformCommands?.[platform] : undefined) ??
+              a.command,
+            requested_action: a.id,
+          },
           mutating: true,
           ...(a.rollback ? { rollback: a.rollback } : {}),
         })),
@@ -153,6 +165,12 @@ export class HeuristicBrain implements Brain {
         reasoning:
           "The ticket asks for these directly, so they are proposed for the control plane to rule on.",
       };
+    }
+
+    // A ticket against the real host takes the local path: real checks, real
+    // thresholds, and no fix applied unless a check genuinely showed a fault.
+    if (isLocalTicket(ticket) && platform !== "unknown" && input.capabilities) {
+      return this.#proposeLocal(input, platform, attempted);
     }
 
     if (!playbook || platform === "unknown") {
@@ -279,6 +297,70 @@ export class HeuristicBrain implements Brain {
     };
   }
 
+  /**
+   * Work a real machine.
+   *
+   * Run every applicable read-only check once, then decide from what came back.
+   * There is deliberately no fix branch here: the checks that exist are
+   * diagnostic, and the faults they find (a full disk, a memory-hungry process)
+   * are resolved by deleting someone's files or killing their work - decisions
+   * a person makes, not an automated technician.
+   */
+  #proposeLocal(
+    input: ProposeInput,
+    platform: HostPlatform,
+    attempted: Set<string>,
+  ): ProposeOutput {
+    const checks = checksFor(platform, input.capabilities!.availableCommands);
+
+    if (checks.length === 0) {
+      return {
+        steps: [],
+        resolved: false,
+        wants_human: true,
+        reasoning: `This host has none of the diagnostic tools the local checks need (probed ${input.capabilities!.availableCommands.length} commands).`,
+      };
+    }
+
+    const next = checks.filter((c) => !attempted.has(c.intent)).slice(0, 3);
+    if (next.length > 0) {
+      return {
+        steps: next.map((check) => ({
+          id: newId("step"),
+          kind: "command" as const,
+          intent: check.intent,
+          payload: { command: check.command[platform]!, local_check: check.id },
+          mutating: false,
+        })),
+        resolved: false,
+        reasoning: `Running ${next.length} read-only check(s) against this machine.`,
+      };
+    }
+
+    // Every check has run. Read the real output and say what is actually true.
+    const findings = readFindings(checks, platform, input.history);
+
+    if (findings.length === 0) {
+      return {
+        steps: [],
+        resolved: true,
+        root_cause:
+          "No fault found. Every check ran clean against this machine's real state.",
+        reasoning:
+          "All checks completed within threshold. Nothing is wrong, so nothing was changed.",
+      };
+    }
+
+    return {
+      steps: [],
+      resolved: false,
+      wants_human: true,
+      root_cause: findings.join(" "),
+      reasoning:
+        "The checks found real problems, but resolving them means deleting a user's data or ending their work, which needs a person.",
+    };
+  }
+
   async document(input: DocumentInput): Promise<Documentation> {
     const { ticket, intake, history, resolved, escalated } = input;
     const playbook = findPlaybook(`${ticket.subject}\n${ticket.description}`);
@@ -288,9 +370,15 @@ export class HeuristicBrain implements Brain {
       (h) => h.outcome === "blocked" || h.outcome === "awaiting_approval",
     );
 
-    const rootCause = resolved
-      ? (playbook?.rootCause ?? "Established during triage.")
-      : "Not established during automated triage.";
+    // The root cause the loop established, not the one a matched playbook would
+    // have predicted. A "sluggish machine" ticket matches the performance
+    // playbook, but if the checks came back clean the write-up must say so
+    // rather than borrowing that playbook's canned cause.
+    const rootCause =
+      input.diagnosis.root_cause ??
+      (resolved
+        ? (playbook?.rootCause ?? "Established during triage.")
+        : "Not established during automated triage.");
 
     const writeup = [
       `Symptom: ${intake.summary}`,
@@ -324,6 +412,7 @@ export class HeuristicBrain implements Brain {
         resolved,
         escalated,
         ranChecks: succeeded.length > 0,
+        changedAnything: succeeded.some((s) => s.step.mutating),
         refusedCategories: [
           ...new Set(
             refused.flatMap((r) => r.verdict.categories.filter((c) => c !== "routine")),
@@ -332,10 +421,12 @@ export class HeuristicBrain implements Brain {
         cause: plainCause(playbook, rootCause),
       }),
       root_cause: rootCause,
-      resolution: resolved
-        ? (playbook?.fixes[ticket.device?.platform ?? "unknown"]?.[0]?.intent ??
-          "Fix applied.")
-        : "No resolution applied automatically.",
+      resolution: !resolved
+        ? "No resolution applied automatically."
+        : succeeded.some((s) => s.step.mutating)
+          ? (playbook?.fixes[ticket.device?.platform ?? "unknown"]?.[0]?.intent ??
+            "Fix applied.")
+          : "No change was needed; the checks came back clean.",
       prevention: resolved ? (playbook?.prevention ?? []) : [],
       // Rough, and labelled as an estimate everywhere it is shown: the value of
       // the number is comparative across tickets, not absolute.
@@ -357,10 +448,19 @@ function userReply(ctx: {
   resolved: boolean;
   escalated: boolean;
   ranChecks: boolean;
+  changedAnything: boolean;
   refusedCategories: string[];
   cause: string;
 }): string {
-  const { name, resolved, escalated, ranChecks, refusedCategories, cause } = ctx;
+  const { name, resolved, escalated, ranChecks, changedAnything, refusedCategories, cause } =
+    ctx;
+
+  // A clean bill of health is a different message from a fix. Saying "I've
+  // applied the fix" when nothing was changed is the kind of small lie that
+  // makes people stop trusting the whole system.
+  if (resolved && !changedAnything) {
+    return `Hi ${name}, I've run a full set of checks on your machine and everything came back within normal range — disk, memory, running processes and name resolution all look healthy. I haven't changed anything. If you're still seeing a problem, tell me what you were doing when it happened and I'll dig into that specifically.`;
+  }
 
   if (resolved) {
     return `Hi ${name}, I've had a look at this. ${cause} I've applied the fix and confirmed it's working again from your machine. Please try what you were doing and let me know if anything is still not right.`;
@@ -430,6 +530,38 @@ function inferCategory(text: string): Intake["category"] {
     if (pattern.test(text)) return category;
   }
   return "other";
+}
+
+/** Tickets raised against the machine this process is running on. */
+export const LOCAL_TICKET_TAG = "local-machine";
+
+function isLocalTicket(ticket: { tags: string[] }): boolean {
+  return ticket.tags.includes(LOCAL_TICKET_TAG);
+}
+
+/**
+ * Read the real command output back through each check's interpreter.
+ *
+ * This is where the local path earns its keep: the verdict comes from the
+ * machine's actual numbers, so a healthy machine produces an empty list and the
+ * run resolves as "nothing wrong" instead of inventing something to fix.
+ */
+function readFindings(
+  checks: LocalCheck[],
+  platform: HostPlatform,
+  history: StepResult[],
+): string[] {
+  const findings: string[] = [];
+  for (const check of checks) {
+    const command = check.command[platform];
+    const result = history.find(
+      (h) => String(h.step.payload["command"]) === command && h.command,
+    );
+    if (!result?.command) continue;
+    const finding = check.interpret(result.command);
+    if (finding) findings.push(finding);
+  }
+  return findings;
 }
 
 /** Playbooks whose fault shows up on screen and is worth photographing. */

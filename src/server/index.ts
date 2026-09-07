@@ -1,122 +1,431 @@
 /**
  * The technician console server.
  *
- * A small HTTP surface over the demo, so the run can be watched rather than
- * read from a terminal. Uses `node:http` directly - the API is four routes, and
- * a framework would be more code than the thing it wraps.
+ * `node:http` directly. The surface is eight routes and one SSE stream; a
+ * framework would be more code than the thing it wraps, and the streaming and
+ * back-pressure behaviour is clearer written out.
  *
  * Routes:
- *   GET  /                    the console
- *   GET  /api/scenarios       what can be run
- *   POST /api/run             run scenarios, return the full result set
- *   GET  /api/knowledge       what has been learned so far
+ *   GET  /                          the console
+ *   GET  /api/scenarios             what can be run, simulated and local
+ *   GET  /api/providers             which reasoning providers are usable
+ *   POST /api/check                 ask the guardrails about a command
+ *   POST /api/runs                  start a run; returns its id immediately
+ *   GET  /api/runs/:id/events       server-sent events for that run
+ *   POST /api/runs/:id/approvals/:approvalId   approve or deny a gated step
+ *   GET  /api/runs/:id/evidence/:file          an artefact from the run
  */
-import { createServer } from "node:http";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runDemo } from "../demo/run-demo.js";
-import { SCENARIOS } from "../demo/scenarios.js";
-import { renderInternalNote } from "../integrations/zendesk/index.js";
-import type { ProviderName } from "../agent/select-brain.js";
+import { runTicket } from "../agent/loop.js";
+import { selectBrainChecked, selectBrain, type ProviderName } from "../agent/select-brain.js";
+import { checkClaudeModel, checkOpenAIModel, withTimeout } from "../agent/model-check.js";
+import { evaluate } from "../control-plane/policy/engine.js";
+import { newId } from "../contracts/index.js";
+import { KnowledgeStore } from "../knowledge/index.js";
+import { seedKnowledge } from "../demo/seed-knowledge.js";
+import { SCENARIOS, TICKETS, USERS, DEVICE_FIELDS } from "../demo/scenarios.js";
+import { LOCAL_SCENARIOS } from "../demo/run-local.js";
+import { localDangerTicket, localHealthTicket, localSession, hostPlatform } from "../demo/local.js";
+import {
+  InMemoryZendeskClient,
+  publicReplyFor,
+  renderInternalNote,
+  ticketUpdateFor,
+  toTicket,
+} from "../integrations/zendesk/index.js";
+import { RunRegistry, type RunSession } from "./run-registry.js";
+import type { DeviceSession } from "../execution-plane/device.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
+const registry = new RunRegistry();
 
-interface RunRequestBody {
-  provider?: ProviderName;
-  scenarios?: string[];
-}
+/* ------------------------------------------------------------------ *
+ * Helpers
+ * ------------------------------------------------------------------ */
 
-async function readBody(
-  stream: NodeJS.ReadableStream,
-): Promise<RunRequestBody> {
+async function readBody<T>(req: IncomingMessage): Promise<T | undefined> {
   const chunks: Buffer[] = [];
-  for await (const chunk of stream) {
-    chunks.push(Buffer.from(chunk));
-  }
+  for await (const chunk of req) chunks.push(Buffer.from(chunk));
   const raw = Buffer.concat(chunks).toString("utf8");
-  if (!raw.trim()) return {};
+  if (!raw.trim()) return undefined;
   try {
-    return JSON.parse(raw) as RunRequestBody;
+    return JSON.parse(raw) as T;
   } catch {
-    return {};
+    return undefined;
   }
 }
 
-export async function startServer(port = Number(process.env["PORT"] ?? 3000)): Promise<void> {
-  const console_html = readFileSync(join(here, "console", "index.html"), "utf8");
+function json(res: ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(body));
+}
+
+/* ------------------------------------------------------------------ *
+ * Starting a run
+ * ------------------------------------------------------------------ */
+
+interface StartRunBody {
+  scenario: string;
+  provider?: ProviderName;
+}
+
+/**
+ * Kick off a run and return immediately.
+ *
+ * The run is driven in the background and reports through the session's event
+ * stream, so the browser can watch it and answer approvals while it is still
+ * going. Errors land on the stream too rather than a dropped connection.
+ */
+function startRun(body: StartRunBody, workdir: string): RunSession {
+  const session = registry.create();
+
+  void (async () => {
+    let device: DeviceSession | undefined;
+    try {
+      const selection = await selectBrainChecked(body.provider);
+      session.emit({
+        type: "started",
+        runId: session.id,
+        provider: selection.provider,
+        model: selection.model,
+        note: selection.note,
+      });
+
+      const knowledge = new KnowledgeStore(join(workdir, "knowledge.jsonl"));
+      seedKnowledge(knowledge);
+
+      const local = LOCAL_SCENARIOS.some((s) => s.key === body.scenario);
+      let ticket;
+      let zendesk: InMemoryZendeskClient | undefined;
+      let zendeskTicketId: number | undefined;
+
+      if (local) {
+        if (hostPlatform() === "unknown") {
+          throw new Error(`No diagnostic set for platform "${process.platform}".`);
+        }
+        ticket =
+          body.scenario === "local-danger" ? localDangerTicket() : localHealthTicket();
+        device = localSession();
+      } else {
+        const scenario = SCENARIOS.find((s) => s.key === body.scenario);
+        if (!scenario) throw new Error(`Unknown scenario "${body.scenario}".`);
+        zendesk = new InMemoryZendeskClient({ tickets: TICKETS, users: USERS });
+        zendeskTicketId = scenario.ticketId;
+        const zTicket = await zendesk.getTicket(scenario.ticketId);
+        ticket = toTicket(zTicket, await zendesk.getUser(zTicket.requester_id), {
+          deviceFields: DEVICE_FIELDS,
+        });
+        device = scenario.makeSession();
+      }
+
+      if (device) {
+        const caps = await device.capabilities();
+        session.emit({
+          type: "host",
+          hostname: ticket.device?.hostname ?? "unknown",
+          platform: caps.platform,
+          tools: caps.availableCommands.length,
+          canCapture: caps.canCapture,
+          ...(caps.captureUnavailableReason
+            ? { captureNote: caps.captureUnavailableReason }
+            : {}),
+        });
+      }
+
+      const run = await runTicket({
+        ticket,
+        brain: selection.brain,
+        knowledge,
+        ...(device ? { session: device } : {}),
+        // The browser is the technician: gated steps wait for a real decision.
+        gate: session.gate(),
+        evidenceRoot: workdir,
+        stepBudget: 10,
+        onEvent: (event) => session.emit(event),
+      });
+
+      // Write back to the help desk for the simulated scenarios, attachments
+      // and all, so the console can show the ticket as a technician would see it.
+      if (zendesk && zendeskTicketId !== undefined) {
+        const tokens: string[] = [];
+        for (const result of run.results) {
+          for (const artifact of result.artifacts) {
+            if (!artifact.content_type?.startsWith("image/")) continue;
+            const path = artifact.uri.replace(/^file:\/\//, "");
+            if (!existsSync(path)) continue;
+            const content = readFileSync(path, "utf8");
+            tokens.push(
+              (await zendesk.upload(path.split("/").pop()!, artifact.content_type, content))
+                .token,
+            );
+          }
+        }
+        await zendesk.updateTicket(zendeskTicketId, ticketUpdateFor(run, tokens));
+        const reply = publicReplyFor(run.documentation, run.escalation, []);
+        if (reply) await zendesk.updateTicket(zendeskTicketId, reply);
+      }
+
+      session.emit({ type: "done", run, internalNote: renderInternalNote(run) });
+      session.finish("finished");
+    } catch (err) {
+      session.emit({
+        type: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+      session.finish("failed");
+    } finally {
+      await device?.end();
+    }
+  })();
+
+  return session;
+}
+
+/* ------------------------------------------------------------------ *
+ * Server
+ * ------------------------------------------------------------------ */
+
+export async function startServer(
+  port = Number(process.env["PORT"] ?? 3000),
+  workdir = "run-artifacts",
+): Promise<{ port: number; close: () => Promise<void> }> {
+  const consoleHtml = readFileSync(join(here, "console", "index.html"), "utf8");
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-
-    const json = (status: number, body: unknown) => {
-      res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(body));
-    };
+    const path = url.pathname;
 
     try {
-      if (req.method === "GET" && url.pathname === "/") {
+      if (req.method === "GET" && path === "/") {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(console_html);
+        res.end(consoleHtml);
         return;
       }
 
-      if (req.method === "GET" && url.pathname === "/api/scenarios") {
-        json(200, {
-          scenarios: SCENARIOS.map((s) => ({
+      if (req.method === "GET" && path === "/api/scenarios") {
+        json(res, 200, {
+          simulated: SCENARIOS.map((s) => ({
             key: s.key,
             title: s.title,
             demonstrates: s.demonstrates,
-            ticket_id: s.ticketId,
+            ticketId: s.ticketId,
           })),
+          local: LOCAL_SCENARIOS,
+          localAvailable: hostPlatform() !== "unknown",
+          hostPlatform: hostPlatform(),
         });
         return;
       }
 
-      if (req.method === "POST" && url.pathname === "/api/run") {
-        const body = await readBody(req);
-        const session = await runDemo({
-          ...(body.provider ? { provider: body.provider } : {}),
-          ...(body.scenarios?.length ? { scenarios: body.scenarios } : {}),
-        });
+      if (req.method === "GET" && path === "/api/providers") {
+        json(res, 200, { providers: await providerStatus() });
+        return;
+      }
 
-        json(200, {
-          provider: {
-            name: session.selection.provider,
-            model: session.selection.model,
-            note: session.selection.note,
+      // Ask the guardrails directly, with no model involved.
+      if (req.method === "POST" && path === "/api/check") {
+        const body = await readBody<{ command?: string }>(req);
+        const command = (body?.command ?? "").trim();
+        if (!command) {
+          json(res, 400, { error: "a command is required" });
+          return;
+        }
+        const verdict = evaluate(
+          {
+            id: newId("check"),
+            kind: "command",
+            intent: command,
+            payload: { command },
+            mutating: false,
           },
-          knowledge_size: session.knowledge.size(),
-          results: session.results.map((r) => ({
-            scenario: {
-              key: r.scenario.key,
-              title: r.scenario.title,
-              demonstrates: r.scenario.demonstrates,
+          {
+            device: {
+              device_id: "check",
+              hostname: "check",
+              platform: "windows",
+              consent_granted: true,
+              managed: true,
             },
-            run: r.run,
-            internal_note: renderInternalNote(r.run),
-            ticket_after: r.ticketAfter,
-            attachments: r.attachments,
-          })),
-        });
+          },
+        );
+        json(res, 200, { command, verdict });
         return;
       }
 
-      if (req.method === "GET" && url.pathname === "/api/knowledge") {
-        // The knowledge base only exists inside a run session, so a bare GET
-        // runs nothing and says so rather than inventing an empty answer.
-        json(200, {
-          note: "Run a scenario first; the knowledge base is built during a run.",
-        });
+      if (req.method === "POST" && path === "/api/runs") {
+        const body = await readBody<StartRunBody>(req);
+        if (!body?.scenario) {
+          json(res, 400, { error: "a scenario is required" });
+          return;
+        }
+        const session = startRun(body, workdir);
+        json(res, 202, { runId: session.id });
         return;
       }
 
-      json(404, { error: "not found" });
+      const eventsMatch = path.match(/^\/api\/runs\/([^/]+)\/events$/);
+      if (req.method === "GET" && eventsMatch) {
+        streamEvents(res, eventsMatch[1]!);
+        return;
+      }
+
+      const approvalMatch = path.match(/^\/api\/runs\/([^/]+)\/approvals\/([^/]+)$/);
+      if (req.method === "POST" && approvalMatch) {
+        const session = registry.get(approvalMatch[1]!);
+        if (!session) {
+          json(res, 404, { error: "unknown run" });
+          return;
+        }
+        const body = await readBody<{ approved?: boolean; approver?: string; reason?: string }>(req);
+        const approved = body?.approved === true;
+        const ok = session.decide(
+          approvalMatch[2]!,
+          approved,
+          body?.approver?.trim() || "technician",
+          body?.reason?.trim() ||
+            (approved ? "Approved at the console." : "Declined at the console."),
+        );
+        json(res, ok ? 200 : 409, ok ? { ok: true } : { error: "approval is no longer pending" });
+        return;
+      }
+
+      const evidenceMatch = path.match(/^\/api\/runs\/([^/]+)\/evidence\/(.+)$/);
+      if (req.method === "GET" && evidenceMatch) {
+        serveEvidence(res, workdir, evidenceMatch[2]!);
+        return;
+      }
+
+      json(res, 404, { error: "not found" });
     } catch (err) {
-      json(500, { error: err instanceof Error ? err.message : String(err) });
+      json(res, 500, { error: err instanceof Error ? err.message : String(err) });
     }
   });
 
   await new Promise<void>((resolve) => server.listen(port, resolve));
-  console.log(`\n  AIT technician console → http://localhost:${port}\n`);
+  const actualPort = (server.address() as { port: number }).port;
+  console.log(`\n  AIT technician console → http://localhost:${actualPort}\n`);
+
+  return {
+    port: actualPort,
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  };
+}
+
+/** Stream a run's events, replaying what has already happened. */
+function streamEvents(res: ServerResponse, runId: string): void {
+  const session = registry.get(runId);
+  if (!session) {
+    json(res, 404, { error: "unknown run" });
+    return;
+  }
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    // Proxies that buffer would defeat the entire point of streaming.
+    "X-Accel-Buffering": "no",
+  });
+
+  const send = (event: unknown) => res.write(`data: ${JSON.stringify(event)}\n\n`);
+
+  // Replay, so a browser that connects late still sees the whole run. The
+  // history already contains every `approval-requested` event, and an approval
+  // that is still pending simply has no matching `approval-resolved` after it -
+  // so there is nothing to re-announce, and doing so would double the card.
+  for (const event of session.history()) send(event);
+
+  const unsubscribe = session.subscribe(send);
+  // A comment frame every 20s keeps intermediaries from closing an idle stream
+  // while the run waits on a human.
+  const keepAlive = setInterval(() => res.write(": keep-alive\n\n"), 20_000);
+
+  res.on("close", () => {
+    clearInterval(keepAlive);
+    unsubscribe();
+  });
+}
+
+/**
+ * Serve one evidence artefact.
+ *
+ * The filename is taken from the request, so it is normalised and confined to
+ * the evidence directory: a console that will hand back any path it is given is
+ * a file-disclosure bug with a nice UI on top.
+ */
+function serveEvidence(res: ServerResponse, workdir: string, file: string): void {
+  const decoded = decodeURIComponent(file);
+  if (decoded.includes("\0")) {
+    json(res, 400, { error: "bad path" });
+    return;
+  }
+
+  // `resolve` handles both an absolute evidence root and one relative to the
+  // working directory; `join(cwd, "/abs/path")` silently produces neither.
+  const root = resolve(workdir);
+  const target = normalize(join(root, decoded));
+  if (!target.startsWith(root + sep) && target !== root) {
+    json(res, 403, { error: "outside the evidence directory" });
+    return;
+  }
+  if (!existsSync(target)) {
+    json(res, 404, { error: "no such artefact" });
+    return;
+  }
+
+  const type = target.endsWith(".svg")
+    ? "image/svg+xml"
+    : target.endsWith(".png")
+      ? "image/png"
+      : "text/plain; charset=utf-8";
+  res.writeHead(200, { "Content-Type": type, "Cache-Control": "no-store" });
+  res.end(readFileSync(target));
+}
+
+async function providerStatus(): Promise<
+  { name: string; state: string; detail: string; model?: string }[]
+> {
+  const out: { name: string; state: string; detail: string; model?: string }[] = [];
+
+  for (const provider of ["claude", "openai"] as const) {
+    let selection;
+    try {
+      selection = selectBrain(provider);
+    } catch (err) {
+      out.push({
+        name: provider,
+        state: "not-configured",
+        detail: err instanceof Error ? err.message : "not configured",
+      });
+      continue;
+    }
+    const check = await withTimeout(
+      provider === "claude"
+        ? checkClaudeModel(selection.model)
+        : checkOpenAIModel(selection.model),
+      { ok: true, model: selection.model, skipped: "timed out", message: "Verification timed out." },
+    );
+    out.push({
+      name: provider,
+      model: selection.model,
+      state: check.skipped ? "unverified" : check.ok ? "ready" : "bad-model",
+      detail: check.message,
+    });
+  }
+
+  const offline = selectBrain("offline");
+  out.push({
+    name: "offline",
+    model: offline.model,
+    state: "ready",
+    detail: "Deterministic playbook engine. No network, no API key.",
+  });
+  return out;
 }
