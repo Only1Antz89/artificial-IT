@@ -139,9 +139,9 @@ async function diagnosticTools(host: HostPlatform): Promise<DoctorCheck> {
 
 /** Tools each platform's full check set wants, for the "missing" comparison. */
 const ALL_REQUIRED: Record<HostPlatform, string[]> = {
-  macos: ["uname", "uptime", "df", "vm_stat", "dscacheutil", "ps"],
-  linux: ["uname", "uptime", "df", "free", "getent", "ps"],
-  windows: ["systeminfo", "powershell", "wmic", "nslookup", "tasklist"],
+  macos: ["uname", "uptime", "df", "vm_stat", "dscacheutil", "ps", "ifconfig", "curl", "lpstat", "pmset"],
+  linux: ["uname", "uptime", "df", "free", "getent", "ps", "ip", "curl", "lpstat", "cat"],
+  windows: ["systeminfo", "powershell", "wmic", "nslookup", "tasklist", "ipconfig", "curl", "powercfg"],
 };
 
 async function screenCapture(host: HostPlatform): Promise<DoctorCheck[]> {

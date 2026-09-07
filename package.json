@@ -22,7 +22,9 @@
     "test:watch": "vitest",
     "local": "tsx src/cli.ts local",
     "providers": "tsx src/cli.ts providers",
-    "reset": "tsx src/cli.ts reset"
+    "reset": "tsx src/cli.ts reset",
+    "queue": "tsx src/cli.ts queue",
+    "ticket": "tsx src/cli.ts ticket"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",

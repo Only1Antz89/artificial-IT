@@ -55,6 +55,14 @@ export interface ProposeInput {
    * failure that looks like a fault. The brain is told what is there.
    */
   capabilities?: SessionCapabilities;
+  /**
+   * Whether an `ask_user` step can actually be answered.
+   *
+   * Same principle as `capabilities.canCapture`: proposing something nobody can
+   * carry out wastes a step and stalls the run. An unattended run sets this
+   * false, and the brain works with what the ticket already says.
+   */
+  canAskUser?: boolean;
 }
 
 export interface ProposeOutput {

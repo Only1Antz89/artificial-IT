@@ -160,6 +160,51 @@
   .stat b{display:block; font-size:19px; line-height:1.2}
   .stat span{font-size:11.5px; color:var(--muted)}
   .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+  .tabs{display:flex;gap:6px;margin-bottom:13px}
+  .tab{flex:1;padding:7px 9px;font-size:12.5px;font-weight:600;border-radius:8px;
+    background:var(--panel-2);color:var(--muted);border:1px solid var(--line)}
+  .tab.active{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+  textarea{resize:vertical;font:inherit;line-height:1.5}
+
+  /* question card */
+  .question{margin:12px 17px;border:2px solid var(--accent);border-radius:var(--radius);
+    padding:15px 16px;background:var(--panel-2)}
+  .question h4{margin:0 0 8px;font-size:14px;color:var(--accent)}
+  .question .q{font-size:14.5px;margin-bottom:11px}
+  .question .row2{display:flex;gap:9px;flex-wrap:wrap}
+  .question input{flex:1;min-width:220px}
+  .question button{width:auto;padding:9px 18px;background:var(--accent);
+    border-color:var(--accent);color:var(--accent-ink)}
+  .question.settled{opacity:.62;border-style:dashed}
+  .question.settled .row2{display:none}
+
+  /* undo */
+  .undo{margin-top:14px;border:1px solid var(--line);border-radius:10px;background:var(--panel-2);padding:13px 15px}
+  .undo h4{margin:0 0 4px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  .undo .item{display:flex;gap:11px;align-items:center;padding:9px 0;border-bottom:1px dashed var(--line)}
+  .undo .item:last-child{border-bottom:0}
+  .undo .item div{flex:1;min-width:0}
+  .undo button{width:auto;padding:7px 14px;flex:none}
+  .undo .done{color:var(--ok);font-size:12.5px;font-weight:600}
+
+  /* knowledge base */
+  .kb{max-height:260px;overflow-y:auto;margin-top:4px}
+  .kb .entry{padding:9px 0;border-bottom:1px dashed var(--line);font-size:12.5px}
+  .kb .entry:last-child{border-bottom:0}
+  .kb .t{font-weight:600;display:flex;gap:8px;align-items:flex-start}
+  .kb .t span{flex:1}
+  .kb .t button{width:auto;padding:2px 8px;font-size:11px;background:transparent;
+    border-color:var(--line);color:var(--muted);flex:none}
+  .kb .m{color:var(--muted);margin-top:3px}
+  .kb .none{color:var(--muted);padding:12px 0;text-align:center}
+
+  /* queue */
+  .qrow{display:flex;gap:11px;align-items:center;padding:10px 17px;border-bottom:1px solid var(--line)}
+  .qrow .n{color:var(--muted);font-size:12px;width:42px;flex:none}
+  .qrow .s{flex:1;min-width:0}
+  .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;
+    padding:16px 17px;border-bottom:1px solid var(--line)}
 </style>
 </head>
 <body>
@@ -174,11 +219,32 @@
     <section class="card">
       <h2>Work a ticket</h2>
       <div class="body">
-        <div class="field">
-          <label for="scenario">Ticket</label>
-          <select id="scenario"></select>
+        <div class="tabs" role="tablist">
+          <button class="tab active" id="tabLive" role="tab">Type one now</button>
+          <button class="tab" id="tabFixture" role="tab">Prepared</button>
         </div>
-        <div class="field">
+
+        <div id="paneLive">
+          <div class="field">
+            <label for="freeText">What is the problem, in the user's words?</label>
+            <textarea id="freeText" rows="5"
+              placeholder="The intranet page won't load — it says the site can't be reached. Everything else seems fine, I can get to Google."></textarea>
+          </div>
+          <div class="field">
+            <label for="target">Which machine?</label>
+            <select id="target"></select>
+          </div>
+        </div>
+
+        <div id="paneFixture" hidden>
+          <div class="field">
+            <label for="scenario">Prepared ticket</label>
+            <select id="scenario"></select>
+          </div>
+          <p class="hint" id="scenarioHint"></p>
+        </div>
+
+        <div class="field" style="margin-top:12px">
           <label for="provider">Reasoning provider</label>
           <select id="provider">
             <option value="">Auto — first configured</option>
@@ -188,7 +254,17 @@
           </select>
         </div>
         <button class="primary" id="run">Run</button>
-        <p class="hint" id="scenarioHint"></p>
+        <button class="ghost" id="runQueue" style="width:100%;margin-top:8px">Work the whole queue</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>What it has learned</h2>
+      <div class="body">
+        <div class="field">
+          <input id="kbSearch" placeholder="Search prior tickets…" autocomplete="off">
+        </div>
+        <div id="kbList" class="kb"></div>
       </div>
     </section>
 
@@ -246,8 +322,27 @@ async function loadProviders() {
 
 /* ---------------- scenarios ---------------- */
 
+let liveMode = true;
+
+function setMode(live) {
+  liveMode = live;
+  $("tabLive").classList.toggle("active", live);
+  $("tabFixture").classList.toggle("active", !live);
+  $("paneLive").hidden = !live;
+  $("paneFixture").hidden = live;
+}
+$("tabLive").addEventListener("click", () => setMode(true));
+$("tabFixture").addEventListener("click", () => setMode(false));
+
 async function loadScenarios() {
   scenarios = await (await fetch("/api/scenarios")).json();
+
+  const targets = $("target");
+  for (const t of scenarios.targets ?? []) {
+    const opt = new Option(`${t.label} — ${t.note}`, t.key);
+    targets.append(opt);
+  }
+
   const sel = $("scenario");
   const sim = document.createElement("optgroup");
   sim.label = "Simulated devices";
@@ -309,18 +404,37 @@ $("cmd").addEventListener("keydown", (e) => { if (e.key === "Enter") check(); })
 /* ---------------- running ---------------- */
 
 $("run").addEventListener("click", async () => {
-  const key = $("scenario").value;
-  if (!key) return;
   const btn = $("run");
-  btn.disabled = true; btn.textContent = "Running…";
+  let body, title, note;
 
+  if (liveMode) {
+    const text = $("freeText").value.trim();
+    if (text.length < 10) {
+      $("freeText").focus();
+      return;
+    }
+    const target = $("target").value;
+    body = {
+      ticket: { description: text, target },
+      provider: $("provider").value || undefined,
+    };
+    title = text.length > 80 ? `${text.slice(0, 77)}…` : text;
+    note = `Typed just now · ${$("target").selectedOptions[0]?.textContent ?? target}`;
+  } else {
+    const key = $("scenario").value;
+    if (!key) return;
+    const m = meta(key);
+    body = { scenario: key, provider: $("provider").value || undefined };
+    title = m?.title ?? key;
+    note = m?.demonstrates ?? "";
+  }
+
+  btn.disabled = true; btn.textContent = "Running…";
   if (source) { source.close(); source = null; }
 
-  const m = meta(key);
   $("stage").innerHTML = `
     <div class="runhead">
-      <div><div class="t">${esc(m?.title ?? key)}</div>
-      <div class="d">${esc(m?.demonstrates ?? "")}</div></div>
+      <div><div class="t">${esc(title)}</div><div class="d">${esc(note)}</div></div>
       <span class="status running" id="statusPill">running</span>
     </div>
     <div id="hostbar"></div>
@@ -330,7 +444,7 @@ $("run").addEventListener("click", async () => {
   try {
     const res = await fetch("/api/runs", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scenario: key, provider: $("provider").value || undefined }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "could not start the run");
@@ -459,6 +573,18 @@ function handle(ev, runId) {
 
     case "approval-requested": renderApproval(ev.approval, runId); break;
 
+    case "question-asked": renderQuestion(ev.question, runId); break;
+
+    case "question-answered": {
+      const card = document.getElementById(`q-${ev.id}`);
+      if (card) {
+        card.classList.add("settled");
+        const out = card.querySelector(".outcome");
+        if (out) out.textContent = `Answered: ${ev.answer}`;
+      }
+      break;
+    }
+
     case "approval-resolved": {
       const card = document.getElementById(`ap-${ev.id}`);
       if (card) {
@@ -478,9 +604,45 @@ function handle(ev, runId) {
       }
       break;
 
-    case "done": renderResult(ev.run, ev.internalNote); break;
+    case "done": renderResult(ev.run, ev.internalNote, ev.undoable ?? [], runId); break;
     case "error": fail(ev.message); break;
   }
+}
+
+function renderQuestion(q, runId) {
+  if (document.getElementById(`q-${q.id}`)) return;
+
+  const card = document.createElement("div");
+  card.className = "question";
+  card.id = `q-${q.id}`;
+  card.innerHTML = `
+    <h4>AIT needs to know something</h4>
+    <div class="q">${esc(q.question)}</div>
+    <div class="row2">
+      <input placeholder="Answer as the user would…" autocomplete="off">
+      <button>Send</button>
+    </div>
+    <div class="rollback outcome"></div>`;
+
+  const input = card.querySelector("input");
+  const send = async () => {
+    const answer = input.value.trim();
+    if (!answer) return;
+    card.querySelectorAll("input,button").forEach((el) => (el.disabled = true));
+    const res = await fetch(`/api/runs/${runId}/questions/${q.id}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answer }),
+    });
+    if (!res.ok) {
+      card.querySelectorAll("input,button").forEach((el) => (el.disabled = false));
+    }
+  };
+  card.querySelector("button").addEventListener("click", send);
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") send(); });
+
+  $("feed").after(card);
+  card.scrollIntoView({ block: "center", behavior: "smooth" });
+  input.focus();
 }
 
 function renderApproval(a, runId) {
@@ -518,7 +680,54 @@ function renderApproval(a, runId) {
   card.scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
-function renderResult(run, internalNote) {
+function renderUndo(undoable, runId) {
+  if (!undoable.length) return "";
+  return `<div class="undo" id="undoPanel">
+    <h4>Changes made — you can put these back</h4>
+    ${undoable.map((u) => `<div class="item" data-step="${esc(u.stepId)}">
+      <div>
+        <div>${esc(u.intent)}</div>
+        <code class="cmd">${esc(u.command)}</code>
+        <div class="sub">Undo runs: <code>${esc(u.rollbackCommand)}</code></div>
+      </div>
+      <button class="ghost" data-undo="${esc(u.stepId)}">Undo</button>
+    </div>`).join("")}
+  </div>`;
+}
+
+function wireUndo(runId) {
+  for (const btn of document.querySelectorAll("[data-undo]")) {
+    btn.addEventListener("click", async () => {
+      const stepId = btn.getAttribute("data-undo");
+      btn.disabled = true; btn.textContent = "Undoing…";
+      try {
+        const res = await fetch(`/api/runs/${runId}/undo/${stepId}`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ approver: "technician" }),
+        });
+        const data = await res.json();
+        const row = btn.closest(".item");
+        if (data.ok) {
+          btn.remove();
+          const done = document.createElement("span");
+          done.className = "done";
+          done.textContent = "✓ put back";
+          row.append(done);
+        } else {
+          btn.disabled = false; btn.textContent = "Undo";
+          const why = document.createElement("div");
+          why.className = "guard";
+          why.textContent = data.error ?? "The undo did not complete.";
+          row.append(why);
+        }
+      } catch (err) {
+        btn.disabled = false; btn.textContent = "Undo";
+      }
+    });
+  }
+}
+
+function renderResult(run, internalNote, undoable, runId) {
   const pill = $("statusPill");
   pill.textContent = run.status;
   pill.className = `status ${run.status === "resolved" ? "resolved" : run.status === "escalated" ? "escalated" : "failed"}`;
@@ -541,7 +750,8 @@ function renderResult(run, internalNote) {
     </div>
 
     <div class="panel"><h3>Reply sent to the user</h3>
-      <div class="reply">${esc(doc.user_reply ?? "")}</div></div>
+      <div class="reply">${esc(doc.user_reply ?? "")}</div>
+      ${renderUndo(undoable, runId)}</div>
 
     ${e?.triggered ? `<div class="panel">
       <h3>Escalated to ${esc(e.route_to)} — ${esc(e.triggers.join(", "))}</h3>
@@ -560,6 +770,9 @@ function renderResult(run, internalNote) {
       <div><pre class="block">${esc(run.audit.map((a) =>
         `${String(a.seq).padStart(2,"0")}  ${a.at.slice(11,19)}  ${a.event.padEnd(20)} ${a.actor.padEnd(7)} ${a.summary}`
       ).join("\n"))}</pre></div></details>`;
+
+  wireUndo(runId);
+  loadKnowledge();
 }
 
 function fail(message) {
@@ -571,8 +784,128 @@ function fail(message) {
   else $("stage").innerHTML = `<div class="panels">${html}</div>`;
 }
 
+/* ---------------- knowledge base ---------------- */
+
+async function loadKnowledge() {
+  const query = $("kbSearch").value.trim();
+  const url = query ? `/api/knowledge?q=${encodeURIComponent(query)}` : "/api/knowledge";
+  try {
+    const { entries, total } = await (await fetch(url)).json();
+    if (!entries.length) {
+      $("kbList").innerHTML = `<div class="none">${
+        query ? "Nothing matches that." : "Nothing learned yet — work a ticket."
+      }</div>`;
+      return;
+    }
+    $("kbList").innerHTML = entries.map((e) => `
+      <div class="entry" id="kb-${esc(e.id)}">
+        <div class="t"><span>${esc(e.title)}</span>
+          <button data-forget="${esc(e.id)}" title="Delete this entry">forget</button></div>
+        <div class="m">${esc(e.root_cause)}</div>
+        <div class="m">${esc(e.category)} · ${esc(e.platform)} · from ${esc(e.source_ticket_id)}${
+          e.matched ? ` · matched ${esc(e.matched.join(", "))}` : ""
+        }</div>
+      </div>`).join("") +
+      (query ? "" : `<div class="m" style="padding-top:8px">${total} entr${total === 1 ? "y" : "ies"}</div>`);
+
+    for (const btn of $("kbList").querySelectorAll("[data-forget]")) {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-forget");
+        // A technician who spots a wrong lesson has to be able to remove it,
+        // or "you stay in control" is a slogan rather than a fact.
+        await fetch(`/api/knowledge/${encodeURIComponent(id)}`, { method: "DELETE" });
+        document.getElementById(`kb-${id}`)?.remove();
+      });
+    }
+  } catch {
+    $("kbList").innerHTML = `<div class="none">Could not read the knowledge base.</div>`;
+  }
+}
+
+let kbTimer;
+$("kbSearch").addEventListener("input", () => {
+  clearTimeout(kbTimer);
+  kbTimer = setTimeout(loadKnowledge, 220);
+});
+
+/* ---------------- queue ---------------- */
+
+$("runQueue").addEventListener("click", async () => {
+  const btn = $("runQueue");
+  btn.disabled = true; btn.textContent = "Working the queue…";
+  if (source) { source.close(); source = null; }
+
+  $("stage").innerHTML = `
+    <div class="runhead">
+      <div><div class="t">The open queue</div>
+      <div class="d">Every unresolved ticket, worked in order, unattended — standing policy decides what may change.</div></div>
+      <span class="status running" id="statusPill">running</span>
+    </div>
+    <div id="queueRows"></div>
+    <div id="panels" class="panels"></div>`;
+
+  try {
+    const res = await fetch("/api/queue", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: $("provider").value || undefined }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? "the queue run failed");
+    renderQueue(data);
+  } catch (err) {
+    fail(err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = "Work the whole queue";
+    loadKnowledge();
+  }
+});
+
+function renderQueue(data) {
+  const pill = $("statusPill");
+  pill.textContent = "finished";
+  pill.className = "status resolved";
+
+  const m = data.metrics;
+  const pct = (n) => `${Math.round(n * 100)}%`;
+  const t = (s) => (s < 1 ? `${Math.round(s * 1000)}ms` : s < 60 ? `${s.toFixed(1)}s` : `${(s / 60).toFixed(1)}m`);
+
+  $("queueRows").innerHTML = data.runs.map((r, i) => {
+    const cls = r.status === "resolved" ? "resolved" : r.status === "escalated" ? "escalated" : "failed";
+    const blocked = r.results.filter((x) => x.outcome === "blocked").length;
+    return `<div class="qrow">
+      <span class="n">${i + 1}/${data.runs.length}</span>
+      <span class="s">${esc(r.ticket.subject)}
+        <div class="sub">${r.results.length} step(s)${blocked ? `, ${blocked} blocked by policy` : ""}</div></span>
+      <span class="status ${cls}">${esc(r.status)}</span>
+    </div>`;
+  }).join("");
+
+  $("panels").innerHTML = `
+    <div class="metrics" style="border:0;padding-left:0">
+      <div class="stat"><b>${m.worked}</b><span>tickets worked</span></div>
+      <div class="stat"><b>${pct(m.autoResolutionRate)}</b><span>auto-resolved (${m.resolved})</span></div>
+      <div class="stat"><b>${pct(m.escalationRate)}</b><span>escalated to a human (${m.escalated})</span></div>
+      <div class="stat"><b>${m.changesApplied}</b><span>changes applied</span></div>
+      <div class="stat"><b>${m.blockedActions}</b><span>blocked by guardrails</span></div>
+      <div class="stat"><b>${t(m.medianTimeToResolveSeconds)}</b><span>median time to resolve</span></div>
+      <div class="stat"><b>${m.knowledgeHits}</b><span>prior tickets used</span></div>
+    </div>
+
+    ${m.refusedCategories.length ? `<div class="panel"><h3>Refused, by category</h3>
+      <ul style="margin:0;padding-left:18px">
+        ${m.refusedCategories.map((c) => `<li>${esc(c.category)} — ${c.count}</li>`).join("")}
+      </ul></div>` : ""}
+
+    <div class="panel"><h3>Estimated technician time saved</h3>
+      <div class="reply">${m.estimatedMinutesSaved} minutes across ${m.worked} tickets.
+      <span class="sub">This one is the model's own estimate per ticket, summed — not a measurement. Everything else on this page is counted from what actually happened.</span></div>
+    </div>`;
+}
+
+setMode(true);
 loadProviders();
 loadScenarios();
+loadKnowledge();
 </script>
 </body>
 </html>

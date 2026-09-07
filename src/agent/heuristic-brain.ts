@@ -34,7 +34,12 @@ import {
   type Playbook,
   type PlaybookStep,
 } from "./playbooks.js";
-import { checksFor, type HostPlatform, type LocalCheck } from "./local-playbooks.js";
+import {
+  checksForCategory,
+  type HostPlatform,
+  type LocalCheck,
+  type TicketCategory,
+} from "./local-playbooks.js";
 
 /** Words in a ticket that mean the user cannot work right now. */
 const BLOCKED = /\b(cannot work|can'?t work|completely|nothing works|blocked|stuck|down|outage|deadline|urgent|asap|client\s+(meeting|call))\b/i;
@@ -164,6 +169,34 @@ export class HeuristicBrain implements Brain {
         resolved: false,
         reasoning:
           "The ticket asks for these directly, so they are proposed for the control plane to rule on.",
+      };
+    }
+
+    // Ask for the one fact that would most change the diagnosis, before
+    // touching anything - but only when someone is there to answer. In an
+    // unattended run the question would stall the ticket rather than improve
+    // it, so the brain works with what it was given.
+    // Only when the answer would actually change what happens next. A ticket
+    // that already matches a playbook has a clear next step, and asking "when
+    // did this start?" before running it is noise a real technician would skip.
+    // A ticket nothing recognises is the opposite: there, one question is worth
+    // more than any amount of guessing.
+    const alreadyAsked = history.some((h) => h.step.kind === "ask_user");
+    const missing = input.intake.missing_information[0];
+    const wouldChangeTheApproach = !playbook && !isLocalTicket(ticket);
+    if (input.canAskUser && !alreadyAsked && missing && wouldChangeTheApproach) {
+      return {
+        steps: [
+          {
+            id: newId("step"),
+            kind: "ask_user",
+            intent: `Ask the user for the one detail that would most change the diagnosis`,
+            payload: { question: questionFor(missing) },
+            mutating: false,
+          },
+        ],
+        resolved: false,
+        reasoning: `The ticket does not say: ${missing}`,
       };
     }
 
@@ -315,7 +348,13 @@ export class HeuristicBrain implements Brain {
     platform: HostPlatform,
     attempted: Set<string>,
   ): ProposeOutput {
-    const checks = checksFor(platform, input.capabilities!.availableCommands);
+    // Targeted by what was actually reported. Handed "my wifi keeps dropping",
+    // a technician does not begin by listing printers.
+    const checks = checksForCategory(
+      platform,
+      input.capabilities!.availableCommands,
+      input.intake.category as TicketCategory,
+    );
 
     if (checks.length === 0) {
       return {
@@ -417,6 +456,7 @@ export class HeuristicBrain implements Brain {
         escalated,
         ranChecks: succeeded.length > 0,
         changedAnything: succeeded.some((s) => s.step.mutating),
+        checkedList: plainCheckNames(succeeded),
         refusedCategories: [
           ...new Set(
             refused.flatMap((r) => r.verdict.categories.filter((c) => c !== "routine")),
@@ -455,15 +495,31 @@ function userReply(ctx: {
   changedAnything: boolean;
   refusedCategories: string[];
   cause: string;
+  /** Plain-English names of the things actually checked. */
+  checkedList: string[];
 }): string {
-  const { name, resolved, escalated, ranChecks, changedAnything, refusedCategories, cause } =
-    ctx;
+  const {
+    name,
+    resolved,
+    escalated,
+    ranChecks,
+    changedAnything,
+    refusedCategories,
+    cause,
+    checkedList,
+  } = ctx;
 
   // A clean bill of health is a different message from a fix. Saying "I've
   // applied the fix" when nothing was changed is the kind of small lie that
   // makes people stop trusting the whole system.
   if (resolved && !changedAnything) {
-    return `Hi ${name}, I've run a full set of checks on your machine and everything came back within normal range — disk, memory, running processes and name resolution all look healthy. I haven't changed anything. If you're still seeing a problem, tell me what you were doing when it happened and I'll dig into that specifically.`;
+    // Name what was actually checked. Now that checks are chosen for the
+    // complaint, a fixed list would claim to have looked at memory and
+    // processes on a ticket where it looked at the network.
+    const looked = checkedList.length
+      ? `I looked at ${joinWords(checkedList)}, and everything came back within normal range.`
+      : "The checks I ran all came back within normal range.";
+    return `Hi ${name}, I've run some checks on your machine. ${looked} I haven't changed anything. If you're still seeing a problem, tell me what you were doing when it happened and I'll dig into that specifically.`;
   }
 
   if (resolved) {
@@ -485,6 +541,41 @@ function userReply(ctx: {
   }
 
   return `Hi ${name}, I've started looking into this and gathered some initial information. I'll come back to you shortly.`;
+}
+
+/**
+ * What the run actually looked at, in words a user would recognise.
+ *
+ * Derived from the checks that ran rather than from a fixed list, so the reply
+ * cannot claim to have examined something it never touched.
+ */
+function plainCheckNames(succeeded: StepResult[]): string[] {
+  const names: Record<string, string> = {
+    "check.disk": "disk space",
+    "check.memory": "memory",
+    "check.top-processes": "what is running",
+    "check.dns": "name resolution",
+    "check.network": "your network connection",
+    "check.reachability": "whether the machine can reach the internet",
+    "check.printers": "your printers",
+    "check.power": "battery and power",
+    "check.uptime": "how hard the machine is working",
+    "check.identity": "the machine itself",
+  };
+  const seen = new Set<string>();
+  for (const step of succeeded) {
+    const id = String(step.step.payload["local_check"] ?? "");
+    const name = names[id];
+    // "the machine itself" is bookkeeping, not something a user cares was checked.
+    if (name && id !== "check.identity") seen.add(name);
+  }
+  return [...seen];
+}
+
+/** "a, b and c" - because "a, b, c" reads like a machine wrote it. */
+function joinWords(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
 /** Plain-English reason a category is off limits, for the user-facing reply. */
@@ -534,6 +625,24 @@ function inferCategory(text: string): Intake["category"] {
     if (pattern.test(text)) return category;
   }
   return "other";
+}
+
+/**
+ * Turn a missing-information note into something a person can answer.
+ *
+ * Intake records gaps as statements ("When the problem started"); a user needs
+ * a question. Anything unrecognised is asked as-is rather than mangled.
+ */
+function questionFor(missing: string): string {
+  const known: [RegExp, string][] = [
+    [/when .* started/i, "When did this start, and had anything changed on the machine just before it?"],
+    [/which device/i, "Which machine is this happening on?"],
+    [/consent/i, "Are you happy for me to connect to your machine and run some checks?"],
+  ];
+  for (const [pattern, question] of known) {
+    if (pattern.test(missing)) return question;
+  }
+  return missing.endsWith("?") ? missing : `Could you tell me: ${missing.replace(/\.$/, "")}?`;
 }
 
 /** Tickets raised against the machine this process is running on. */
@@ -630,6 +739,7 @@ function toStep(step: PlaybookStep, playbook: Playbook): PlanStep {
     payload: { command: step.command, playbook: playbook.id },
     mutating: step.mutating,
     ...(step.rollback ? { rollback: step.rollback } : {}),
+    ...(step.rollbackCommand ? { rollback_command: step.rollbackCommand } : {}),
   };
 }
 

@@ -87,6 +87,16 @@ export const PlanStep = z.object({
   mutating: z.boolean().default(false),
   /** How the technician would undo it, if it is mutating. */
   rollback: z.string().optional(),
+  /**
+   * The command that would actually undo it.
+   *
+   * Separate from `rollback` on purpose. The prose is for a human reading the
+   * ticket ("the cache repopulates on its own"); this is the thing a machine
+   * can run. Plenty of changes have an honest prose rollback and no command -
+   * a flushed cache refills itself - and pretending otherwise would give the
+   * console an Undo button that does nothing.
+   */
+  rollback_command: z.string().optional(),
 });
 export type PlanStep = z.infer<typeof PlanStep>;
 

@@ -95,12 +95,12 @@ describe("converting a model proposal into a plan step", () => {
     const a = toPlanStep({
       kind: "command", intent: "check", command: "ipconfig /all", question: null,
       path: null, caption: null, annotations: null, tests_hypothesis: null,
-      mutating: false, rollback: null,
+      mutating: false, rollback: null, rollback_command: null,
     });
     const b = toPlanStep({
       kind: "command", intent: "check", command: "ipconfig /all", question: null,
       path: null, caption: null, annotations: null, tests_hypothesis: null,
-      mutating: false, rollback: null,
+      mutating: false, rollback: null, rollback_command: null,
     });
     expect(a.id).not.toBe(b.id);
   });
@@ -109,7 +109,7 @@ describe("converting a model proposal into a plan step", () => {
     const step = toPlanStep({
       kind: "command", intent: "check", command: "ipconfig /all", question: null,
       path: null, caption: null, annotations: null, tests_hypothesis: null,
-      mutating: false, rollback: null,
+      mutating: false, rollback: null, rollback_command: null,
     });
     expect(step.payload).toEqual({ command: "ipconfig /all" });
     expect(step.rollback).toBeUndefined();
@@ -123,7 +123,7 @@ describe("converting a model proposal into a plan step", () => {
       annotations: [
         { style: "problem", box: { x: 1, y: 2, width: 3, height: 4 }, label: "here" },
       ],
-      tests_hypothesis: null, mutating: false, rollback: null,
+      tests_hypothesis: null, mutating: false, rollback: null, rollback_command: null,
     });
     expect(step.payload["caption"]).toBe("The error");
     expect((step.payload["annotations"] as unknown[]).length).toBe(1);

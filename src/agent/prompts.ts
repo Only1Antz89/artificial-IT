@@ -62,7 +62,8 @@ export const PROPOSE_INSTRUCTIONS = `Propose the next steps.
 Rules:
 - Propose at most 3 steps at a time. You will be called again with the results.
 - Prefer read-only commands. Set mutating: false for anything that only observes.
-- Any step that changes device state must set mutating: true and give a rollback.
+- Any step that changes device state must set mutating: true and give a rollback in prose.
+- Where a single command genuinely reverses the step, give it as rollback_command. Where nothing can reverse it, or it reverses itself (a flushed cache refills), leave rollback_command null rather than inventing something - a technician will be offered that command as an Undo button.
 - Give each step a real command in payload.command for kind "command"; a question in payload.question for kind "ask_user".
 - For kind "screenshot", you may include payload.annotations: an array of
   { style: "problem" | "action" | "info", box: {x, y, width, height}, label } to mark up what the user should look at.

@@ -65,87 +65,90 @@ Open **http://localhost:3000**.
 
 ---
 
-## A running order for the demo
+## Running it live
 
-Five minutes, building from "it does useful work" to "and it knows when not to".
+The console opens on **Type one now**. There is no fixture behind it: whatever
+you type goes to the configured brain, and the same guardrails, approval gate
+and write-up apply.
 
-### 1. It does the boring work properly — 60s
+Ask the room for a problem. Type it. Pick the machine — including the Mac you
+are standing at — and press Run.
 
-Pick **Intranet unreachable (Windows)** and hit Run.
+### What to try, and what each one shows
 
-Watch the steps arrive: it reads the ticket, recalls prior tickets, forms a
-diagnosis, then runs read-only checks *before* changing anything. It confirms the
-adapter has an address, proves the network works by IP, and only then discovers
-that name resolution is what's broken. It applies the fix and **re-runs the
-failing check to confirm** before calling it resolved.
+**Something it recognises.** *"Nothing is printing. The jobs sit in the queue
+and never come out."* → simulated Windows desktop.
 
-> The point: it verifies rather than assumes. A fix that was applied is not the
-> same as a fix that worked.
+It captures the screen, marks up the paused queue, runs read-only checks, then
+**stops and asks you** to approve restarting the spooler. Decline it and the run
+escalates with nothing touched; approve it and the change goes through, gets
+verified, and appears in the audit trail under your name.
 
-### 2. It stops and asks you — 90s
+Afterwards there is an **Undo** button against each change. Press it and the
+rollback actually runs — through the same policy engine, recorded the same way.
 
-Pick **Print jobs stuck in the queue (Windows)** and hit Run.
+**Something vague.** *"Something is wrong with my machine and I'm not sure
+what."*
 
-An annotated screenshot lands on the ticket, then the run **stops** and asks you
-to approve restarting the print spooler. The card shows which rule fired, why AIT
-wants it, and the rollback.
+Nothing matches, so instead of guessing it **asks you a question** and waits.
+Type an answer as the user would; the run picks up your answer and carries on
+with it on the record.
 
-It asks **twice** — once to stop the service, once to start it again — because
-each is a separate change to the machine and is judged on its own.
+**Something dangerous.** *"Reset my password and clear out my home directory to
+free up space — and turn the firewall off, it keeps blocking my dev server."* →
+**This machine**.
 
-Decline both. The run escalates, the spooler is never touched, and your
-decision is in the audit trail with your name on it.
+Every part is refused, each naming the rule and category, and nothing runs at
+all. Point out that the target was the real machine in the room.
 
-Run it again and approve both. Same ticket, different outcome: two changes
-applied, verified, resolved — and the audit records who authorised each one.
+**Something healthy.** *"My laptop feels sluggish today, can you check it
+over?"* → **This machine**.
 
-> The point: a person is in the loop for anything that changes a machine, and
-> the record says who decided what.
+Real commands, real thresholds. On a healthy Mac it comes back **resolved with
+nothing changed**, and the reply names exactly what it looked at. The failure
+people fear is an AI that finds something to fix; this one reports a clean bill
+of health.
 
-### 3. It refuses, on your actual machine — 90s
+### The queue
 
-Pick **Dangerous requests against this machine** and hit Run.
+**Work the whole queue** takes every open ticket in one go and reports the
+shift: how many were auto-resolved, how many went to a human, what was blocked
+and by which category, median time to resolve.
 
-This one is aimed at the Mac you are standing in front of. The ticket asks to
-reset your password, delete your home directory and turn off your firewall. All
-three are refused, each naming the rule and the category, and **nothing runs at
-all** — no command result exists on any step.
+That is the slide a service-desk manager wants. Note the estimated-time-saved
+figure is labelled as the model's own estimate — everything else on that panel
+is counted from what actually happened.
 
-The handover pack below shows what a human would need to pick it up.
+### The two side panels
 
-> The point: the guardrails are not a prompt asking nicely. Nothing reached the
-> machine.
+**What it has learned** lists every entry from prior tickets, searchable, each
+with a **forget** button. Run the intranet ticket, then the same problem on a
+different machine, and watch the second run cite the first. Then delete the
+entry to show it is yours to correct.
 
-Then, in the sidebar, type a command into **Ask the guardrails** — no model
-involved, just the policy engine:
+**Ask the guardrails** takes any command and gives you the verdict with no model
+involved:
 
 ```
 rm -rf ~/Documents         → BLOCK   block.destructive
-sudo dscl . -passwd ...    → BLOCK   block.credentials.password-change
+cat ~/.env                 → BLOCK   block.credentials.secret-exfiltration
+find / -delete             → BLOCK   block.destructive
 df -h /                    → ALLOW   allow.read-only-diagnostic
 brew install htop          → REQUIRE_APPROVAL
 ```
 
-### 4. It won't invent a problem — 45s
+### From the terminal instead
 
-Pick **Check over this machine** and hit Run.
+```bash
+npm run ticket -- "the intranet will not load on my machine"
+npm run ticket -- "nothing is printing" --target simulated-windows-desktop
+npm run queue
+```
 
-Real commands against your real Mac: disk, memory, running processes, DNS. On a
-healthy machine it comes back **resolved with nothing changed** and says so
-plainly to the user.
+### Prepared tickets
 
-> The point: the failure mode people fear from an AI technician is that it finds
-> something to fix. This one reports a clean bill of health.
-
-### 5. It learns — 30s
-
-Run **Intranet unreachable (Windows)**, then **Intranet unreachable again
-(macOS)**.
-
-The second run recalls what the first learned — different platform, same root
-cause — and says so in the diagnosis, citing the earlier ticket.
-
----
+The **Prepared** tab still holds the five scripted scenarios if you want a known
+path — useful for a rehearsal, or if the room has no problem to offer.
 
 ## Screen recording
 
@@ -170,6 +173,19 @@ permission has not taken effect yet.
 
 This only affects the local-machine scenarios. The simulated ones draw their
 frames from device state and need no permission at all.
+
+## A note on the offline engine
+
+Without an API key, the reasoning is done by a deterministic playbook engine.
+It knows the common families — connectivity and DNS, printing, disk, memory,
+performance — and works any ticket against the real machine. Hand it something
+outside those and it will say so and escalate rather than guess, which is the
+right answer but a quieter demo moment.
+
+If you want free-text to handle anything the room throws at it, set
+`ANTHROPIC_API_KEY` or `OPENAI_API_KEY` and pick that provider in the console.
+The guardrails are identical either way — worth demonstrating by running the
+dangerous ticket under both.
 
 ## Between rehearsals
 

@@ -69,7 +69,9 @@ rectangle.
 | Reads and updates Zendesk tickets | `src/integrations/zendesk/` |
 | Attaches annotated screenshots to tickets | `src/execution-plane/annotate.ts` |
 | Learns from previous tickets | `src/knowledge/` |
-| Live technician console with in-browser approvals | `src/server/` |
+| Live technician console, free-text intake, in-browser approvals and Q&A | `src/server/`, `src/demo/adhoc.ts` |
+| Undo an applied change | `src/server/undo.ts` |
+| Queue mode and shift metrics | `src/demo/run-queue.ts`, `src/demo/metrics.ts` |
 | Remote device sessions over MeshCentral | `src/execution-plane/remote.ts` |
 
 ## The guardrails
@@ -145,6 +147,14 @@ npm run demo                    # all five
 npm run demo -- dns-outage      # just one
 npm run cli -- scenarios        # list them, including the local ones
 npm run cli -- providers        # which providers are configured and verified
+```
+
+Or skip the fixtures entirely:
+
+```bash
+npm run ticket -- "the intranet will not load on my machine"
+npm run ticket -- "nothing is printing" --target simulated-windows-desktop
+npm run queue                   # every open ticket, with a shift summary
 ```
 
 | Scenario | What it shows |
@@ -246,7 +256,7 @@ does not block a run that would otherwise succeed — it is reported as
 ## Development
 
 ```bash
-npm test          # 182 tests
+npm test          # 240 tests
 npm run typecheck
 npm run build
 ```

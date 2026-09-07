@@ -86,6 +86,8 @@ export const WireStep = z.object({
   tests_hypothesis: z.number().int().nullable(),
   mutating: z.boolean(),
   rollback: z.string().nullable(),
+  /** A command that reverses this step, or null when nothing can. */
+  rollback_command: z.string().nullable(),
 });
 export type WireStep = z.infer<typeof WireStep>;
 
@@ -130,5 +132,6 @@ export function toPlanStep(s: WireStep): PlanStep {
     ...(s.tests_hypothesis !== null ? { tests_hypothesis: s.tests_hypothesis } : {}),
     mutating: s.mutating,
     ...(s.rollback ? { rollback: s.rollback } : {}),
+    ...(s.rollback_command ? { rollback_command: s.rollback_command } : {}),
   };
 }

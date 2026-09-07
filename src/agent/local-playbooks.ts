@@ -20,9 +20,31 @@ import type { CommandResult } from "../contracts/index.js";
 
 export type HostPlatform = "windows" | "macos" | "linux";
 
+/** Ticket categories, mirrored from the Intake contract. */
+export type TicketCategory =
+  | "connectivity"
+  | "authentication"
+  | "hardware"
+  | "software"
+  | "performance"
+  | "printing"
+  | "email"
+  | "storage"
+  | "security"
+  | "access-request"
+  | "other";
+
 export interface LocalCheck {
   id: string;
   intent: string;
+  /**
+   * Categories this check is worth running for.
+   *
+   * A technician handed "my wifi keeps dropping" does not start by listing
+   * printers. `"*"` marks the handful worth running whatever the complaint is -
+   * knowing the machine and whether the disk is full is never wasted.
+   */
+  relevantTo: (TicketCategory | "*")[];
   /** Command per platform. Absent means "not applicable here". */
   command: Partial<Record<HostPlatform, string>>;
   /** Base command that must exist on the host for this check to be proposed. */
@@ -97,6 +119,7 @@ const MEMORY_WARN = 92;
 export const LOCAL_CHECKS: LocalCheck[] = [
   {
     id: "check.identity",
+    relevantTo: ["*"],
     intent: "Confirm which machine and account we are working on",
     command: { linux: "uname -a", macos: "uname -a", windows: "systeminfo" },
     requires: { linux: "uname", macos: "uname", windows: "systeminfo" },
@@ -105,6 +128,7 @@ export const LOCAL_CHECKS: LocalCheck[] = [
   },
   {
     id: "check.uptime",
+    relevantTo: ["*"],
     intent: "Check how long the machine has been up",
     command: { linux: "uptime", macos: "uptime", windows: "powershell -NoProfile -Command Get-Uptime" },
     requires: { linux: "uptime", macos: "uptime", windows: "powershell" },
@@ -119,6 +143,7 @@ export const LOCAL_CHECKS: LocalCheck[] = [
   },
   {
     id: "check.disk",
+    relevantTo: ["*"],
     intent: "Check free space on the system volume",
     command: {
       linux: "df -h /",
@@ -143,6 +168,7 @@ export const LOCAL_CHECKS: LocalCheck[] = [
   },
   {
     id: "check.memory",
+    relevantTo: ["performance", "software", "other"],
     intent: "Check memory pressure",
     command: { linux: "free -m", macos: "vm_stat", windows: "systeminfo" },
     requires: { linux: "free", macos: "vm_stat", windows: "systeminfo" },
@@ -162,6 +188,7 @@ export const LOCAL_CHECKS: LocalCheck[] = [
   },
   {
     id: "check.dns",
+    relevantTo: ["connectivity", "email", "software", "other"],
     intent: "Check that name resolution is working",
     command: {
       linux: "getent hosts example.com",
@@ -181,7 +208,92 @@ export const LOCAL_CHECKS: LocalCheck[] = [
       `Name resolution is working: ${r.stdout.trim().split("\n")[0] ?? "resolved"}`,
   },
   {
+    id: "check.network",
+    relevantTo: ["connectivity", "email"],
+    intent: "Check the network interface has an address",
+    command: {
+      linux: "ip -4 addr show",
+      macos: "ifconfig en0",
+      windows: "ipconfig /all",
+    },
+    requires: { linux: "ip", macos: "ifconfig", windows: "ipconfig" },
+    interpret: (r) => {
+      // No routable address means the machine is not on a network at all,
+      // which explains every connectivity symptom at once.
+      if (!/inet\s+\d+\.\d+\.\d+\.\d+|IPv4 Address/i.test(r.stdout)) {
+        return "The interface has no IPv4 address, so the machine is not on the network.";
+      }
+      return /inet\s+169\.254\.|Autoconfiguration IPv4/i.test(r.stdout)
+        ? "The interface has a self-assigned (169.254.x.x) address, which means DHCP did not answer."
+        : undefined;
+    },
+    healthy: (r) => {
+      const ip = r.stdout.match(/inet\s+(\d+\.\d+\.\d+\.\d+)/)?.[1];
+      return ip ? `Interface has address ${ip}.` : "Interface has an address.";
+    },
+  },
+  {
+    id: "check.reachability",
+    relevantTo: ["connectivity", "email"],
+    intent: "Check the machine can reach the internet by IP, bypassing DNS",
+    command: {
+      // curl beats ping here: it is present far more often, needs no raw
+      // sockets, and separates "no route" from "no name resolution" just as
+      // well when pointed at an address.
+      linux: "curl -s -o /dev/null -w %{http_code} --max-time 8 http://1.1.1.1",
+      macos: "curl -s -o /dev/null -w %{http_code} --max-time 8 http://1.1.1.1",
+      windows: "curl -s -o /dev/null -w %{http_code} --max-time 8 http://1.1.1.1",
+    },
+    requires: { linux: "curl", macos: "curl", windows: "curl" },
+    interpret: (r) =>
+      r.exit_code === 0 && /\d{3}/.test(r.stdout)
+        ? undefined
+        : "Could not reach 1.1.1.1 by IP, so the network path itself is down - this is not a DNS problem.",
+    healthy: () => "The machine can reach the internet by IP, so the network path is up.",
+  },
+  {
+    id: "check.printers",
+    relevantTo: ["printing"],
+    intent: "List the printers and the state of their queues",
+    command: {
+      linux: "lpstat -t",
+      macos: "lpstat -t",
+      windows: "wmic printer get name,printerstatus,workoffline",
+    },
+    requires: { linux: "lpstat", macos: "lpstat", windows: "wmic" },
+    interpret: (r) => {
+      if (/disabled|not accepting/i.test(r.stdout)) {
+        return "A print queue is disabled or not accepting jobs, so anything sent to it will sit unprinted.";
+      }
+      return /TRUE/i.test(r.stdout) ? "A printer is marked offline." : undefined;
+    },
+    healthy: (r) =>
+      r.stdout.trim() ? "Print queues are accepting jobs." : "No printers are configured on this machine.",
+  },
+  {
+    id: "check.power",
+    relevantTo: ["hardware", "performance"],
+    intent: "Check battery and power state",
+    command: {
+      linux: "cat /sys/class/power_supply/BAT0/capacity",
+      macos: "pmset -g batt",
+      // `powercfg /batteryreport` writes a report file; this reads the value
+      // instead. A "read-only" check that writes is not read-only.
+      windows: "wmic path Win32_Battery get EstimatedChargeRemaining",
+    },
+    requires: { linux: "cat", macos: "pmset", windows: "wmic" },
+    interpret: (r) => {
+      const percent = Number(r.stdout.match(/(\d{1,3})%/)?.[1] ?? r.stdout.trim());
+      if (!Number.isFinite(percent)) return undefined;
+      return percent > 0 && percent < 15
+        ? `Battery is at ${percent}%, low enough to explain throttling or sudden shutdowns.`
+        : undefined;
+    },
+    healthy: (r) => `Power state read: ${r.stdout.trim().split("\n")[0] ?? "ok"}`,
+  },
+  {
     id: "check.top-processes",
+    relevantTo: ["performance", "software", "other"],
     intent: "Identify the processes using the most memory",
     command: {
       linux: "ps -eo pid,pmem,pcpu,comm --sort=-pmem",
@@ -220,4 +332,26 @@ export function checksFor(
     const requires = check.requires[platform];
     return Boolean(command) && Boolean(requires) && available.has(requires!);
   });
+}
+
+/**
+ * The checks worth running for a particular complaint.
+ *
+ * Filters by category first, then falls back to the whole runnable set when a
+ * category has nothing specific - a general sweep is the right answer to "it
+ * just feels wrong", and a poor answer to "my printer is stuck".
+ */
+export function checksForCategory(
+  platform: HostPlatform,
+  availableCommands: string[],
+  category: TicketCategory,
+): LocalCheck[] {
+  const runnable = checksFor(platform, availableCommands);
+  const targeted = runnable.filter(
+    (c) => c.relevantTo.includes("*") || c.relevantTo.includes(category),
+  );
+  // A category with nothing but the always-run checks is not really targeted,
+  // so widen rather than run three checks and call it a diagnosis.
+  const specific = targeted.filter((c) => !c.relevantTo.includes("*"));
+  return specific.length > 0 ? targeted : runnable;
 }

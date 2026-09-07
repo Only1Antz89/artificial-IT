@@ -16,6 +16,8 @@ export interface PlaybookStep {
   command: string;
   mutating: boolean;
   rollback?: string;
+  /** A command that genuinely reverses this step, where one exists. */
+  rollbackCommand?: string;
   /** Substring that, if present in stdout, indicates the fault was found. */
   faultSignal?: string;
 }
@@ -139,12 +141,14 @@ export const PLAYBOOKS: Playbook[] = [
           command: "net stop spooler",
           mutating: true,
           rollback: "Start the service again with `net start spooler`.",
+          rollbackCommand: "net start spooler",
         },
         {
           intent: "Start the print spooler service again and clear the queue",
           command: "net start spooler",
           mutating: true,
           rollback: "Stop the service again with `net stop spooler`.",
+          rollbackCommand: "net stop spooler",
         },
       ],
       macos: [
@@ -153,6 +157,7 @@ export const PLAYBOOKS: Playbook[] = [
           command: "cupsenable HP-LaserJet-4F",
           mutating: true,
           rollback: "Disable the queue again with `cupsdisable HP-LaserJet-4F`.",
+          rollbackCommand: "cupsdisable HP-LaserJet-4F",
         },
       ],
       linux: [
@@ -161,6 +166,7 @@ export const PLAYBOOKS: Playbook[] = [
           command: "systemctl restart cups",
           mutating: true,
           rollback: "Restart the service again, or roll back with `systemctl stop cups`.",
+          rollbackCommand: "systemctl restart cups",
         },
       ],
       unknown: NONE,

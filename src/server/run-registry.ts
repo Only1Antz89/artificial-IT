@@ -17,6 +17,8 @@
 import { randomUUID } from "node:crypto";
 import type { RunEvent } from "../agent/loop.js";
 import type { PlanStep, PolicyVerdict, Run } from "../contracts/index.js";
+import type { DeviceSession } from "../execution-plane/device.js";
+import type { UndoableChange } from "./undo.js";
 import type {
   ApprovalGate,
   ApprovalOutcome,
@@ -31,6 +33,15 @@ export interface PendingApproval {
   requestedAt: string;
 }
 
+/** A question AIT has put to the user, waiting on a reply. */
+export interface PendingQuestion {
+  id: string;
+  question: string;
+  /** Why it is asking - the step's stated intent. */
+  intent: string;
+  askedAt: string;
+}
+
 /** What the browser receives. A superset of RunEvent with the UI's own events. */
 export type StreamEvent =
   | { type: "started"; runId: string; provider: string; model: string; note: string }
@@ -38,8 +49,10 @@ export type StreamEvent =
   | RunEvent
   | { type: "approval-requested"; approval: PendingApproval }
   | { type: "approval-resolved"; id: string; approved: boolean; approver: string; reason: string }
+  | { type: "question-asked"; question: PendingQuestion }
+  | { type: "question-answered"; id: string; answer: string }
   | { type: "error"; message: string }
-  | { type: "done"; run: Run; internalNote: string };
+  | { type: "done"; run: Run; internalNote: string; undoable: UndoableChange[] };
 
 type Subscriber = (event: StreamEvent) => void;
 
@@ -48,9 +61,21 @@ export class RunSession {
   readonly startedAt = new Date().toISOString();
   status: "running" | "finished" | "failed" = "running";
 
+  /**
+   * The finished run, and the device session it used.
+   *
+   * Both are kept after the run ends so a technician can undo a change from
+   * the console. The session is a real connection, so it is not kept forever:
+   * `keepOpenFor` closes it once the window for changing your mind has passed.
+   */
+  run?: Run;
+  device?: DeviceSession;
+  #closeTimer?: NodeJS.Timeout;
+
   #events: StreamEvent[] = [];
   #subscribers = new Set<Subscriber>();
   #pending = new Map<string, { approval: PendingApproval; resolve: (o: ApprovalOutcome) => void }>();
+  #questions = new Map<string, { question: PendingQuestion; resolve: (a?: string) => void }>();
 
   /** Replayed to a subscriber that connects mid-run, so nothing is missed. */
   history(): StreamEvent[] {
@@ -76,6 +101,55 @@ export class RunSession {
 
   pending(): PendingApproval[] {
     return [...this.#pending.values()].map((p) => p.approval);
+  }
+
+  questions(): PendingQuestion[] {
+    return [...this.#questions.values()].map((q) => q.question);
+  }
+
+  /**
+   * Put a question to whoever is watching, and wait.
+   *
+   * The timeout resolves to `undefined` rather than a guess: an unanswered
+   * question means the run pauses and hands over, which is what a technician
+   * would do rather than inventing what the user probably meant.
+   */
+  ask(timeoutMs = 5 * 60 * 1000) {
+    const session = this;
+    return async (question: string, step: PlanStep): Promise<string | undefined> => {
+      const pending: PendingQuestion = {
+        id: randomUUID(),
+        question,
+        intent: step.intent,
+        askedAt: new Date().toISOString(),
+      };
+
+      return new Promise<string | undefined>((resolve) => {
+        const timer = setTimeout(() => {
+          session.#questions.delete(pending.id);
+          resolve(undefined);
+        }, timeoutMs);
+
+        session.#questions.set(pending.id, {
+          question: pending,
+          resolve: (answer) => {
+            clearTimeout(timer);
+            resolve(answer);
+          },
+        });
+        session.emit({ type: "question-asked", question: pending });
+      });
+    };
+  }
+
+  /** Answer a pending question from the browser. Returns false if unknown. */
+  answer(id: string, answer: string): boolean {
+    const entry = this.#questions.get(id);
+    if (!entry) return false;
+    this.#questions.delete(id);
+    this.emit({ type: "question-answered", id, answer });
+    entry.resolve(answer);
+    return true;
   }
 
   /**
@@ -139,6 +213,27 @@ export class RunSession {
     return true;
   }
 
+  /**
+   * Hold the device session open for a while after the run.
+   *
+   * Long enough that "actually, put that back" works; short enough that a
+   * console left open overnight is not holding a session on someone's machine.
+   */
+  keepOpenFor(ms: number): void {
+    clearTimeout(this.#closeTimer);
+    this.#closeTimer = setTimeout(() => void this.closeDevice(), ms);
+    // A pending close must not be the reason a process cannot exit.
+    this.#closeTimer.unref?.();
+  }
+
+  async closeDevice(): Promise<void> {
+    clearTimeout(this.#closeTimer);
+    this.#closeTimer = undefined;
+    const device = this.device;
+    this.device = undefined;
+    await device?.end().catch(() => undefined);
+  }
+
   finish(status: "finished" | "failed"): void {
     this.status = status;
     // Any approval still outstanding is answered "no" - a finished run must not
@@ -150,6 +245,10 @@ export class RunSession {
         approver: "system",
         reason: "The run ended before this was answered.",
       });
+    }
+    for (const [id, entry] of this.#questions) {
+      this.#questions.delete(id);
+      entry.resolve(undefined);
     }
   }
 }
@@ -201,6 +300,9 @@ export class RunRegistry {
     let over = this.#runs.size - (this.maxRuns - 1);
     for (const victim of finished) {
       if (over <= 0) break;
+      // Evicting a run drops the only handle on its device session, so close
+      // it rather than leaking a connection to someone's machine.
+      void victim.closeDevice();
       this.#runs.delete(victim.id);
       over -= 1;
     }

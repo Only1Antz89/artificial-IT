@@ -10,7 +10,7 @@
  * Storage is a JSONL file. It is append-friendly, diffable in review, and
  * swappable for a database-backed store later without touching callers.
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
 import { IsoDateTime, nowIso } from "../contracts/index.js";
@@ -82,5 +82,39 @@ export class KnowledgeStore {
 
   size(): number {
     return this.#entries.length;
+  }
+
+  /**
+   * Remove an entry and rewrite the file.
+   *
+   * A technician who spots a wrong lesson has to be able to delete it, or
+   * "the knowledge base is yours to correct" is a slogan rather than a fact.
+   * The file is rewritten rather than tombstoned so what is on disk is always
+   * exactly what the assistant will use.
+   */
+  remove(id: string): boolean {
+    const before = this.#entries.length;
+    this.#entries = this.#entries.filter((e) => e.id !== id);
+    if (this.#entries.length === before) return false;
+    this.#rewrite();
+    return true;
+  }
+
+  /** Record that an entry was used and led somewhere, for ranking. */
+  markApplied(id: string): boolean {
+    const entry = this.#entries.find((e) => e.id === id);
+    if (!entry) return false;
+    entry.times_applied += 1;
+    this.#rewrite();
+    return true;
+  }
+
+  #rewrite(): void {
+    mkdirSync(dirname(this.path), { recursive: true });
+    writeFileSync(
+      this.path,
+      this.#entries.map((e) => `${JSON.stringify(e)}\n`).join(""),
+      "utf8",
+    );
   }
 }

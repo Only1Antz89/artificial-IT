@@ -24,11 +24,22 @@ import { selectBrainChecked, selectBrain, type ProviderName } from "../agent/sel
 import { checkClaudeModel, checkOpenAIModel, withTimeout } from "../agent/model-check.js";
 import { evaluate } from "../control-plane/policy/engine.js";
 import { newId } from "../contracts/index.js";
-import { KnowledgeStore } from "../knowledge/index.js";
+import { KnowledgeStore, retrieve } from "../knowledge/index.js";
 import { seedKnowledge } from "../demo/seed-knowledge.js";
 import { SCENARIOS, TICKETS, USERS, DEVICE_FIELDS } from "../demo/scenarios.js";
 import { LOCAL_SCENARIOS } from "../demo/run-local.js";
 import { localDangerTicket, localHealthTicket, localSession, hostPlatform } from "../demo/local.js";
+import {
+  AD_HOC_TARGETS,
+  adHocTicket,
+  localTargetAvailable,
+  type AdHocRequest,
+} from "../demo/adhoc.js";
+import {
+  makeMacDnsDevice,
+  makeWindowsDnsDevice,
+  makeWindowsPrintDevice,
+} from "../demo/devices.js";
 import {
   InMemoryZendeskClient,
   publicReplyFor,
@@ -37,10 +48,20 @@ import {
   toTicket,
 } from "../integrations/zendesk/index.js";
 import { RunRegistry, type RunSession } from "./run-registry.js";
+import { undoChange, undoableChanges } from "./undo.js";
+import { runQueue } from "../demo/run-queue.js";
 import type { DeviceSession } from "../execution-plane/device.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const registry = new RunRegistry();
+
+/**
+ * How long a device session stays open after its run, so a change can be undone.
+ *
+ * Long enough to change your mind, short enough that a console left open
+ * overnight is not holding a live session on someone's machine.
+ */
+const UNDO_WINDOW_MS = 15 * 60 * 1000;
 
 /* ------------------------------------------------------------------ *
  * Helpers
@@ -68,8 +89,27 @@ function json(res: ServerResponse, status: number, body: unknown): void {
  * ------------------------------------------------------------------ */
 
 interface StartRunBody {
-  scenario: string;
+  /** A fixture scenario key, or absent when `ticket` carries an ad-hoc one. */
+  scenario?: string;
+  /** A ticket typed on the spot. */
+  ticket?: AdHocRequest;
   provider?: ProviderName;
+}
+
+/** Open a session against whichever machine an ad-hoc ticket names. */
+function adHocSession(target: AdHocRequest["target"]): DeviceSession | undefined {
+  switch (target) {
+    case "simulated-windows-laptop":
+      return makeWindowsDnsDevice();
+    case "simulated-windows-desktop":
+      return makeWindowsPrintDevice();
+    case "simulated-mac-laptop":
+      return makeMacDnsDevice();
+    case "no-device":
+      return undefined;
+    default:
+      return localSession();
+  }
 }
 
 /**
@@ -102,7 +142,12 @@ function startRun(body: StartRunBody, workdir: string): RunSession {
       let zendesk: InMemoryZendeskClient | undefined;
       let zendeskTicketId: number | undefined;
 
-      if (local) {
+      if (body.ticket) {
+        // Typed on the spot. Nothing is matched or pre-arranged - it goes to
+        // whichever brain is configured, exactly as a fixture ticket would.
+        ticket = adHocTicket(body.ticket);
+        device = adHocSession(body.ticket.target);
+      } else if (local) {
         if (hostPlatform() === "unknown") {
           throw new Error(`No diagnostic set for platform "${process.platform}".`);
         }
@@ -140,8 +185,10 @@ function startRun(body: StartRunBody, workdir: string): RunSession {
         brain: selection.brain,
         knowledge,
         ...(device ? { session: device } : {}),
-        // The browser is the technician: gated steps wait for a real decision.
+        // The browser is the technician: gated steps wait for a real decision,
+        // and a question to the user waits for a real answer.
         gate: session.gate(),
+        askUser: session.ask(),
         evidenceRoot: workdir,
         stepBudget: 10,
         onEvent: (event) => session.emit(event),
@@ -168,8 +215,19 @@ function startRun(body: StartRunBody, workdir: string): RunSession {
         if (reply) await zendesk.updateTicket(zendeskTicketId, reply);
       }
 
-      session.emit({ type: "done", run, internalNote: renderInternalNote(run) });
+      // Held so a technician can still undo a change, then closed on a timer.
+      session.run = run;
+      session.device = device;
+      device = undefined;
+
+      session.emit({
+        type: "done",
+        run,
+        internalNote: renderInternalNote(run),
+        undoable: undoableChanges(run),
+      });
       session.finish("finished");
+      session.keepOpenFor(UNDO_WINDOW_MS);
     } catch (err) {
       session.emit({
         type: "error",
@@ -216,7 +274,33 @@ export async function startServer(
           local: LOCAL_SCENARIOS,
           localAvailable: hostPlatform() !== "unknown",
           hostPlatform: hostPlatform(),
+          // Targets an ad-hoc ticket can be pointed at.
+          targets: AD_HOC_TARGETS.filter(
+            (t) => t.key !== "this-machine" || localTargetAvailable(),
+          ),
         });
+        return;
+      }
+
+      // What AIT has learned - readable, searchable and deletable, because a
+      // knowledge base a technician cannot correct is one they cannot trust.
+      if (req.method === "GET" && path === "/api/knowledge") {
+        const store = new KnowledgeStore(join(workdir, "knowledge.jsonl"));
+        const query = (url.searchParams.get("q") ?? "").trim();
+        const entries = query
+          ? retrieve(store.all(), { text: query, limit: 50, minScore: 0.1, minCoverage: 0 }).map(
+              (hit) => ({ ...hit.entry, matched: hit.matched_terms }),
+            )
+          : store.all().sort((a, b) => b.learned_at.localeCompare(a.learned_at));
+        json(res, 200, { entries, total: store.size() });
+        return;
+      }
+
+      const kbDelete = path.match(/^\/api\/knowledge\/([^/]+)$/);
+      if (req.method === "DELETE" && kbDelete) {
+        const store = new KnowledgeStore(join(workdir, "knowledge.jsonl"));
+        const removed = store.remove(decodeURIComponent(kbDelete[1]!));
+        json(res, removed ? 200 : 404, removed ? { ok: true } : { error: "no such entry" });
         return;
       }
 
@@ -255,10 +339,30 @@ export async function startServer(
         return;
       }
 
+      if (req.method === "POST" && path === "/api/queue") {
+        const body = await readBody<{ provider?: ProviderName; limit?: number }>(req);
+        const result = await runQueue({
+          ...(body?.provider ? { provider: body.provider } : {}),
+          ...(body?.limit ? { limit: body.limit } : {}),
+          workdir,
+        });
+        json(res, 200, {
+          provider: {
+            name: result.selection.provider,
+            model: result.selection.model,
+            note: result.selection.note,
+          },
+          runs: result.runs,
+          metrics: result.metrics,
+          knowledgeSize: result.knowledgeSize,
+        });
+        return;
+      }
+
       if (req.method === "POST" && path === "/api/runs") {
         const body = await readBody<StartRunBody>(req);
-        if (!body?.scenario) {
-          json(res, 400, { error: "a scenario is required" });
+        if (!body?.scenario && !body?.ticket?.description) {
+          json(res, 400, { error: "a scenario key or a ticket description is required" });
           return;
         }
         const session = startRun(body, workdir);
@@ -279,6 +383,24 @@ export async function startServer(
         return;
       }
 
+      const answerMatch = path.match(/^\/api\/runs\/([^/]+)\/questions\/([^/]+)$/);
+      if (req.method === "POST" && answerMatch) {
+        const session = registry.get(answerMatch[1]!);
+        if (!session) {
+          json(res, 404, { error: "unknown run" });
+          return;
+        }
+        const body = await readBody<{ answer?: string }>(req);
+        const answer = (body?.answer ?? "").trim();
+        if (!answer) {
+          json(res, 400, { error: "an answer is required" });
+          return;
+        }
+        const ok = session.answer(answerMatch[2]!, answer);
+        json(res, ok ? 200 : 409, ok ? { ok: true } : { error: "that question is no longer open" });
+        return;
+      }
+
       const approvalMatch = path.match(/^\/api\/runs\/([^/]+)\/approvals\/([^/]+)$/);
       if (req.method === "POST" && approvalMatch) {
         const session = registry.get(approvalMatch[1]!);
@@ -296,6 +418,28 @@ export async function startServer(
             (approved ? "Approved at the console." : "Declined at the console."),
         );
         json(res, ok ? 200 : 409, ok ? { ok: true } : { error: "approval is no longer pending" });
+        return;
+      }
+
+      const undoMatch = path.match(/^\/api\/runs\/([^/]+)\/undo\/([^/]+)$/);
+      if (req.method === "POST" && undoMatch) {
+        const session = registry.get(undoMatch[1]!);
+        if (!session?.run) {
+          json(res, 404, { error: "unknown or unfinished run" });
+          return;
+        }
+        const body = await readBody<{ approver?: string }>(req);
+        const outcome = await undoChange(
+          session.run,
+          undoMatch[2]!,
+          session.device,
+          workdir,
+          body?.approver?.trim() || "technician",
+        );
+        // The stream carries the undo too, so the console shows it as a step
+        // rather than silently mutating the page.
+        if (outcome.result) session.emit({ type: "step", result: outcome.result });
+        json(res, outcome.ok ? 200 : 409, outcome);
         return;
       }
 

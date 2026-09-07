@@ -20,6 +20,14 @@ import type { RunEvent } from "./agent/loop.js";
 import type { Scenario } from "./demo/scenarios.js";
 import type { ProviderName } from "./agent/select-brain.js";
 import { LOCAL_SCENARIOS, runLocal, type LocalScenarioKey } from "./demo/run-local.js";
+import { runQueue } from "./demo/run-queue.js";
+import { adHocTicket, AD_HOC_TARGETS, type AdHocTarget } from "./demo/adhoc.js";
+import { runTicket } from "./agent/loop.js";
+import { selectBrainChecked } from "./agent/select-brain.js";
+import { PolicyBoundGate } from "./control-plane/approvals.js";
+import { KnowledgeStore } from "./knowledge/index.js";
+import { localSession } from "./demo/local.js";
+import { makeMacDnsDevice, makeWindowsDnsDevice, makeWindowsPrintDevice } from "./demo/devices.js";
 import { selectBrain } from "./agent/select-brain.js";
 import { runDoctor, type CheckState } from "./doctor.js";
 import * as nodeFs from "node:fs";
@@ -226,6 +234,122 @@ function cmdReset(): void {
   console.log(`\n  ${c.green("Cleared")} ./${dir} — evidence and learned knowledge.\n`);
 }
 
+/** Work the whole open queue, and report on the shift. */
+async function cmdQueue(args: string[]): Promise<void> {
+  const provider = readFlag(args, "--provider") as ProviderName | undefined;
+  const limit = Number(readFlag(args, "--limit") ?? 25);
+
+  console.log(`\n${c.bold("AIT — working the queue")}\n`);
+
+  const { selection, runs, metrics, knowledgeSize } = await runQueue({
+    ...(provider ? { provider } : {}),
+    limit,
+    onTicketStart: (_id, subject, index, total) => {
+      console.log(`  ${c.dim(`[${index}/${total}]`)} ${subject}`);
+    },
+    onTicketDone: (run) => {
+      const mark =
+        run.status === "resolved" ? c.green("resolved") : c.yellow(run.status);
+      const blocked = run.results.filter((r) => r.outcome === "blocked").length;
+      console.log(
+        `         → ${mark}  ${c.dim(`${run.results.length} step(s)${blocked ? `, ${blocked} blocked` : ""}`)}\n`,
+      );
+    },
+  });
+
+  const pct = (n: number) => `${Math.round(n * 100)}%`;
+  // Sub-second is normal against a simulated device and worth showing as such,
+  // rather than rounding a real measurement down to zero.
+  const mins = (s: number) =>
+    s < 1 ? `${Math.round(s * 1000)}ms` : s < 60 ? `${s.toFixed(1)}s` : `${(s / 60).toFixed(1)}m`;
+
+  console.log(c.bold("── Shift summary"));
+  console.log(`   provider            ${selection.provider} (${selection.model})`);
+  console.log(`   tickets worked      ${metrics.worked}`);
+  console.log(
+    `   auto-resolved       ${c.green(`${metrics.resolved}`)}  ${c.dim(`(${pct(metrics.autoResolutionRate)})`)}`,
+  );
+  console.log(
+    `   escalated           ${c.yellow(`${metrics.escalated}`)}  ${c.dim(`(${pct(metrics.escalationRate)})`)}`,
+  );
+  console.log(`   changes applied     ${metrics.changesApplied}`);
+  console.log(`   blocked by policy   ${c.red(`${metrics.blockedActions}`)}`);
+  console.log(
+    `   time to resolve     median ${mins(metrics.medianTimeToResolveSeconds)}, mean ${mins(metrics.meanTimeToResolveSeconds)}`,
+  );
+  console.log(`   prior tickets used  ${metrics.knowledgeHits}`);
+  console.log(`   knowledge base      ${knowledgeSize} entries`);
+  console.log(
+    `   ${c.dim(`estimated technician time saved: ${metrics.estimatedMinutesSaved} min (the model's own estimate, not a measurement)`)}`,
+  );
+
+  if (metrics.refusedCategories.length > 0) {
+    console.log(`\n   ${c.bold("Refused by category")}`);
+    for (const { category, count } of metrics.refusedCategories) {
+      console.log(`     ${c.red("⛔")} ${category.padEnd(20)} ${count}`);
+    }
+  }
+  console.log("");
+}
+
+/** Work a ticket typed on the spot. */
+async function cmdTicket(args: string[]): Promise<void> {
+  const provider = readFlag(args, "--provider") as ProviderName | undefined;
+  const target = (readFlag(args, "--target") ?? "this-machine") as AdHocTarget;
+  const description = args
+    .filter((a, i) => !a.startsWith("-") && args[i - 1] !== "--provider" && args[i - 1] !== "--target")
+    .join(" ");
+
+  if (!description.trim()) {
+    console.error('\nUsage: ait ticket "the intranet will not load on my machine"');
+    console.error(`Targets: ${AD_HOC_TARGETS.map((t) => t.key).join(", ")}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const ticket = adHocTicket({ description, target });
+  const selection = await selectBrainChecked(provider);
+
+  const session =
+    target === "no-device"
+      ? undefined
+      : target === "simulated-windows-laptop"
+        ? makeWindowsDnsDevice()
+        : target === "simulated-windows-desktop"
+          ? makeWindowsPrintDevice()
+          : target === "simulated-mac-laptop"
+            ? makeMacDnsDevice()
+            : localSession();
+
+  console.log(`\n${c.bold("AIT")} ${c.dim(`— ${selection.provider} (${selection.model}) · ${target}`)}`);
+  console.log(`${c.dim("ticket:")} ${ticket.subject}\n`);
+
+  const run = await runTicket({
+    ticket,
+    brain: selection.brain,
+    knowledge: new KnowledgeStore("run-artifacts/knowledge.jsonl"),
+    ...(session ? { session } : {}),
+    gate: new PolicyBoundGate(),
+    evidenceRoot: "run-artifacts",
+    stepBudget: 10,
+    onEvent: (event) => printEvent({ key: "ad-hoc" } as Scenario, event),
+  });
+  await session?.end();
+
+  console.log(
+    `\n  outcome    ${run.status === "resolved" ? c.green(run.status) : c.yellow(run.status)} · ${run.results.length} step(s)`,
+  );
+  const changed = run.results.filter((r) => r.outcome === "success" && r.step.mutating).length;
+  console.log(
+    `  ${changed === 0 ? c.green("Nothing on the device was changed.") : c.yellow(`${changed} change(s) applied.`)}`,
+  );
+  if (run.documentation) {
+    console.log(`\n  ${c.bold("Reply to user")}`);
+    for (const line of wrap(run.documentation.user_reply, 76)) console.log(`    ${line}`);
+  }
+  console.log("");
+}
+
 /** Preflight everything before a live demo. */
 async function cmdDoctor(args: string[]): Promise<void> {
   const port = Number(readFlag(args, "--port") ?? process.env["PORT"] ?? 3000);
@@ -398,6 +522,9 @@ function usage(): void {
   console.log(`
 ${c.bold("AIT")} — AI IT technician
 
+  ait ticket "<problem>"      work a ticket you type right now
+  ait ticket "..." --target simulated-windows-desktop
+  ait queue                   work the whole open queue, with shift metrics
   ait doctor                  preflight everything before a live demo
   ait reset                   clear evidence and learned knowledge
   ait demo [scenario...]      run the simulated demo (all scenarios by default)
@@ -422,6 +549,12 @@ async function main(): Promise<void> {
       break;
     case "local":
       await cmdLocal(args);
+      break;
+    case "queue":
+      await cmdQueue(args);
+      break;
+    case "ticket":
+      await cmdTicket(args);
       break;
     case "doctor":
       await cmdDoctor(args);

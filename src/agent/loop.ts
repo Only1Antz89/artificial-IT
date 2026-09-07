@@ -47,6 +47,15 @@ export interface RunOptions {
   evidenceRoot?: string;
   /** Answers available to `ask_user` steps without waiting on a real person. */
   userAnswers?: Record<string, string>;
+  /**
+   * Put a question to the user and wait for the answer.
+   *
+   * When present, an `ask_user` step becomes a real pause rather than a dead
+   * end: the console asks, someone types a reply, and the run carries on with
+   * it. Absent, the step falls back to `userAnswers` and then to stopping -
+   * which is right for an unattended run, where nobody is there to answer.
+   */
+  askUser?: (question: string, step: PlanStep) => Promise<string | undefined>;
   /** Called after each meaningful event, for the console and the CLI. */
   onEvent?: (event: RunEvent) => void;
   /** Write a knowledge entry when the run settles. Default true. */
@@ -74,6 +83,7 @@ export async function runTicket(options: RunOptions): Promise<Run> {
     stepBudget = 12,
     evidenceRoot = "run-artifacts",
     userAnswers,
+    askUser,
     onEvent,
     learn = true,
   } = options;
@@ -84,6 +94,8 @@ export async function runTicket(options: RunOptions): Promise<Run> {
   const evidence = new EvidenceStore(evidenceRoot, run_id);
   const results: StepResult[] = [];
   const proposed: PlanStep[] = [];
+  /** Questions put to the user during the run, and what they said. */
+  const userSaid: { question: string; answer: string }[] = [];
 
   // Probe the machine once, up front. Everything downstream reasons about what
   // this host actually has rather than what its platform usually has.
@@ -174,13 +186,32 @@ export async function runTicket(options: RunOptions): Promise<Run> {
 
   while (!resolved && !wantsHuman && executed < stepBudget) {
     const proposal = await brain.propose({
-      ticket,
+      ticket: userSaid.length
+        ? {
+            ...ticket,
+            // The brain sees the answers as part of the conversation, which is
+            // where a technician would find them on a real ticket.
+            comments: [
+              ...ticket.comments,
+              ...userSaid.map((said, i) => ({
+                id: `answer-${i}`,
+                author: ticket.requester.name,
+                author_role: "requester" as const,
+                body: `${said.question} — ${said.answer}`,
+                created_at: nowIso(),
+                public: true,
+                attachments: [],
+              })),
+            ],
+          }
+        : ticket,
       intake,
       diagnosis,
       priorTickets,
       history: results,
       remainingBudget: stepBudget - executed,
       ...(capabilities ? { capabilities } : {}),
+      canAskUser: Boolean(askUser),
     });
 
     if (proposal.root_cause) rootCause = proposal.root_cause;
@@ -274,10 +305,32 @@ export async function runTicket(options: RunOptions): Promise<Run> {
         }
       }
 
+      // A question the operator can actually answer is asked here, before the
+      // executor sees the step, so the answer arrives as an ordinary result.
+      let answers = userAnswers;
+      if (step.kind === "ask_user" && askUser) {
+        const question = String(step.payload["question"] ?? step.intent);
+        if (answers?.[question] === undefined) {
+          audit.record("approval.requested", "agent", `Asked the user: ${question}`, {
+            step: step.id,
+          });
+          const answer = await askUser(question, step);
+          if (answer !== undefined && answer.trim() !== "") {
+            answers = { ...(answers ?? {}), [question]: answer };
+            // Kept on the run so the write-up and the ticket carry what the
+            // user actually said, not a paraphrase of it.
+            userSaid.push({ question, answer });
+            audit.record("step.executed", "human", `User answered: ${answer}`, {
+              question,
+            });
+          }
+        }
+      }
+
       const result = await executeStep(step, cleared, {
         ...(session ? { session } : {}),
         evidence,
-        ...(userAnswers ? { userAnswers } : {}),
+        ...(answers ? { userAnswers: answers } : {}),
       });
       results.push(result);
       executed += 1;
