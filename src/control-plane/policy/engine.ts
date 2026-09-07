@@ -240,8 +240,17 @@ export function evaluate(step: PlanStep, ctx: PolicyContext = {}): PolicyVerdict
 
   // A pipeline is only as safe as its most dangerous segment, so every segment
   // is checked independently rather than trusting the leading command.
+  //
+  // Newlines and carriage returns are command *terminators* in shell grammar -
+  // handled before word splitting - so `df -h /\nacme-repair` is two commands,
+  // not one command with an argument. Missing them meant an unreviewed command
+  // could ride through on the allowlisted one in front of it.
+  //
+  // Tab is deliberately not in this list: it is an IFS word separator, so
+  // `df -h /<tab>acme-repair` passes acme-repair to df as an argument and never
+  // executes it.
   const segments = command
-    .split(/\|\||&&|[|;&]/)
+    .split(/\|\||&&|[|;&\n\r]/)
     .map((s) => s.trim())
     .filter(Boolean);
 

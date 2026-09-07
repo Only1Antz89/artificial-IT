@@ -83,6 +83,21 @@ These are real, and stated plainly rather than left for someone to discover:
   human rather than running. Deny-by-default is what carries the weight here,
   not the regexes.
 
+  Review has found three classes of miss so far, all now covered by tests in
+  `tests/bugs.test.ts`, and they are worth knowing about because the same
+  shapes will recur:
+
+  - **Separators the splitter did not know about.** Newlines terminate a
+    command in shell grammar, so `df -h /` followed by a newline and something
+    else is two commands. Segments are split on those now.
+  - **Flags that change what an allowlisted command does.** `find` deletes with
+    `-delete`, `curl` uploads with `-T`, `grep` reads credential stores. The
+    allowlist trusts a base command, so each dangerous form needs its own rule.
+  - **Regex boundaries that do not hold on real paths.** `\b\.env` never
+    matches `/home/user/.env`, because `/` and `.` are both non-word characters
+    and there is no boundary between them. Anything dot-prefixed needs matching
+    without a leading `\b`.
+
 - **Prompt injection via ticket content.** Ticket text is untrusted input and
   reaches the model. A crafted ticket could persuade a model to propose
   something harmful — which is precisely why the guardrails do not consult the

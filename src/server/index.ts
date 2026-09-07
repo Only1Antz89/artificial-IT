@@ -268,7 +268,14 @@ export async function startServer(
 
       const eventsMatch = path.match(/^\/api\/runs\/([^/]+)\/events$/);
       if (req.method === "GET" && eventsMatch) {
-        streamEvents(res, eventsMatch[1]!);
+        // A reconnecting EventSource sends back the last id it saw. Honour it,
+        // or the client redraws the entire run every time its connection blips.
+        const lastEventId = Number(req.headers["last-event-id"]);
+        streamEvents(
+          res,
+          eventsMatch[1]!,
+          Number.isInteger(lastEventId) ? lastEventId : undefined,
+        );
         return;
       }
 
@@ -318,11 +325,30 @@ export async function startServer(
   };
 }
 
-/** Stream a run's events, replaying what has already happened. */
-function streamEvents(res: ServerResponse, runId: string): void {
+/**
+ * Stream a run's events.
+ *
+ * Every frame carries an `id:`, which is the event's index in the run's
+ * history. A browser that loses its connection reconnects automatically and
+ * sends the last id it saw in `Last-Event-ID`; replaying from there rather than
+ * from the beginning is the difference between a brief blip and a console that
+ * draws the whole run a second time.
+ */
+function streamEvents(res: ServerResponse, runId: string, lastEventId?: number): void {
   const session = registry.get(runId);
   if (!session) {
     json(res, 404, { error: "unknown run" });
+    return;
+  }
+
+  const history = session.history();
+  const resumeAfter = lastEventId === undefined ? -1 : lastEventId;
+
+  // Nothing left to send on a run that is over. Answering 200 with an empty
+  // body would leave the browser reconnecting every few seconds for the life of
+  // the tab; 204 is the one response EventSource treats as "stop asking".
+  if (session.status !== "running" && resumeAfter >= history.length - 1) {
+    res.writeHead(204).end();
     return;
   }
 
@@ -334,23 +360,44 @@ function streamEvents(res: ServerResponse, runId: string): void {
     "X-Accel-Buffering": "no",
   });
 
-  const send = (event: unknown) => res.write(`data: ${JSON.stringify(event)}\n\n`);
+  // `id` is the index in the run's history, so it is stable across reconnects.
+  let nextId = 0;
+  const send = (event: unknown) => {
+    res.write(`id: ${nextId}\ndata: ${JSON.stringify(event)}\n\n`);
+    nextId += 1;
+  };
 
-  // Replay, so a browser that connects late still sees the whole run. The
-  // history already contains every `approval-requested` event, and an approval
-  // that is still pending simply has no matching `approval-resolved` after it -
-  // so there is nothing to re-announce, and doing so would double the card.
-  for (const event of session.history()) send(event);
+  // Replay, so a browser that connects late still sees the whole run - but only
+  // the part it has not already seen. The history already contains every
+  // `approval-requested` event, and an approval that is still pending simply has
+  // no matching `approval-resolved` after it, so there is nothing to
+  // re-announce and doing so would double the card.
+  nextId = Math.min(resumeAfter + 1, history.length);
+  for (const event of history.slice(nextId)) send(event);
 
-  const unsubscribe = session.subscribe(send);
   // A comment frame every 20s keeps intermediaries from closing an idle stream
   // while the run waits on a human.
   const keepAlive = setInterval(() => res.write(": keep-alive\n\n"), 20_000);
-
-  res.on("close", () => {
+  const finish = () => {
     clearInterval(keepAlive);
     unsubscribe();
+    if (!res.writableEnded) res.end();
+  };
+
+  const unsubscribe = session.subscribe((event) => {
+    send(event);
+    // Close the stream when the run is over. Left open, every finished run
+    // leaked a socket and a keep-alive interval for as long as the process
+    // lived, and a browser that had navigated away would never learn to stop.
+    const type = (event as { type?: string }).type;
+    if (type === "done" || type === "error") setImmediate(finish);
   });
+
+  // The run may already have finished before this subscriber arrived, in which
+  // case the replay above carried its terminal event and nothing more is coming.
+  if (session.status !== "running") setImmediate(finish);
+
+  res.on("close", finish);
 }
 
 /**

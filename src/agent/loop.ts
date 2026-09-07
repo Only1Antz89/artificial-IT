@@ -305,6 +305,15 @@ export async function runTicket(options: RunOptions): Promise<Run> {
         halted = true;
         continue;
       }
+      // A refused approval ends it too. "No" means no to the change, and the
+      // steps that follow are usually the rest of the same change - asking to
+      // start a service a technician has just refused to let us stop is not a
+      // second question, it is the same question asked again.
+      if (result.outcome === "awaiting_approval") {
+        wantsHuman = true;
+        halted = true;
+        continue;
+      }
       // Waiting on a person is a pause, not a failure - stop and hand over.
       if (result.outcome === "awaiting_user") {
         wantsHuman = true;

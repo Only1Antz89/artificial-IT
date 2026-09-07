@@ -115,10 +115,20 @@ function skipped(model: string, provider: string, err: unknown): ModelCheck {
   };
 }
 
-/** Guard against a hung list call holding up a run. */
+/**
+ * Guard against a hung list call holding up a run.
+ *
+ * The timer is cleared whichever side wins. `Promise.race` settles the race but
+ * does not cancel the loser, so an uncleared timer keeps the Node event loop
+ * alive for its full duration - which turned a CLI that had finished its work
+ * in 200ms into one that sat silent for another ten seconds.
+ */
 export function withTimeout<T>(promise: Promise<T>, fallback: T, ms = LIST_TIMEOUT_MS): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
-  ]);
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }

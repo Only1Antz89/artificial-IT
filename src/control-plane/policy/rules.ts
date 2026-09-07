@@ -58,13 +58,21 @@ export const BLOCKING_RULES: GuardrailRule[] = [
     category: "credentials",
     decision: "block",
     patterns: [
-      /\b(cat|type|get-content|less|more|head|tail)\b[^\n]*\b(id_rsa|id_ed25519|\.pem|\.ppk|shadow|sam|ntds\.dit|credentials|\.env|secrets?\.(json|ya?ml))\b/i,
+      // Two alternations on purpose. A dot-prefixed name cannot carry a
+      // leading `\b`: after a path separator both `/` and `.` are non-word
+      // characters, so there is no boundary between them and `\b\.env` never
+      // matches `/home/user/.env`. That gap let a file full of API keys and
+      // database passwords read straight through.
+      /\b(cat|type|get-content|less|more|head|tail|strings|xxd|od|nl)\b[^\n]*(\b(id_rsa|id_ed25519|id_ecdsa|shadow|sam|ntds\.dit|credentials|secrets?\.(json|ya?ml))\b|\.(pem|ppk|env|key|p12|pfx|jks|keystore)\b)/i,
       /\bsecurity\s+find-(generic|internet)-password\b/i,
       /\bcmdkey\s+\/list\b/i,
       /\bvaultcmd\b/i,
       /\bmimikatz\b/i,
       /\bkeychain[_-]?dump\b/i,
       /\bgpg\s+--export-secret-keys\b/i,
+      // Searching a credential store is reading it. `grep` is allowlisted for
+      // ordinary log triage; pointing it at these paths is not that.
+      /\b(grep|egrep|rg|ag|ack|findstr|select-string)\b[^\n]*(\b(id_rsa|id_ed25519|shadow|sudoers|credentials|keychain)\b|\.(ssh|env|pem|key)\b)/i,
     ],
     reason:
       "Reading stored passwords, keys or credential vaults is never part of a support fix, so this action is blocked.",
@@ -141,6 +149,12 @@ export const BLOCKING_RULES: GuardrailRule[] = [
       /\bdel\s+\/[sq]\b[^\n]*[\\\/]\*/i,
       /\b(wipe|erase|factory\s+reset|nuke)\b[^\n]{0,30}\b(disk|drive|device|machine|profile|data)\b/i,
       /\bDrop\s+(Database|Table)\b/i,
+      // `find` is on the read-only allowlist because searching a filesystem is
+      // ordinary triage - but these flags turn the same command into a
+      // recursive delete. The allowlist trusts a base command; this does not.
+      /\bfind\b[^\n]*\s-delete\b/i,
+      /\bfind\b[^\n]*\s-exec(dir)?\s+(rm|mv|shred|dd|truncate)\b/i,
+      /\bxargs\b[^\n]*\b(rm|shred)\b/i,
     ],
     reason:
       "This would destroy data or a filesystem irreversibly. Automated remediation never performs unrecoverable deletions.",
@@ -180,6 +194,11 @@ export const BLOCKING_RULES: GuardrailRule[] = [
       /\b(scp|rsync|sftp|curl\s+-T|robocopy|xcopy)\b[^\n]*\b(@|https?:\/\/|\\\\)/i,
       /\b(upload|exfil|send|copy|sync)\b[^\n]{0,40}\b(all|entire|everything|whole)\b[^\n]{0,20}\b(documents?|files?|mailbox|drive|profile|database)\b/i,
       /\bCompress-Archive\b[^\n]*\b(Users|Documents)\b[^\n]*\b(temp|tmp|public)\b/i,
+      // `curl` and `wget` are allowlisted for fetching, which is read-only.
+      // These flags make them send instead, which is the opposite.
+      /\bcurl\b[^\n]*\s(-T|--upload-file|-F|--form|--data-binary\s+@|-d\s+@)/i,
+      /\bwget\b[^\n]*\s--(post-file|body-file)\b/i,
+      /\bInvoke-(RestMethod|WebRequest)\b[^\n]*-InFile\b/i,
     ],
     reason:
       "Bulk-copying user data off the device is blocked, regardless of the destination.",
@@ -293,6 +312,16 @@ export const APPROVAL_RULES: GuardrailRule[] = [
     ],
     reason:
       "Writing to system configuration is reversible but not invisible, so a technician signs it off.",
+  },
+  {
+    id: "approve.secret-search",
+    category: "credentials",
+    decision: "require_approval",
+    patterns: [
+      /\b(grep|egrep|rg|ag|ack|findstr|select-string)\b[^\n]*\b(password|passwd|secret|api[_-]?key|apikey|token|credential)s?\b/i,
+    ],
+    reason:
+      "Searching for credentials can be legitimate triage or can be harvesting, so a technician decides which this is.",
   },
   {
     id: "approve.process-termination",

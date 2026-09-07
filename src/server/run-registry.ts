@@ -181,12 +181,28 @@ export class RunRegistry {
     return [...this.#runs.values()];
   }
 
+  /**
+   * Drop finished runs until the registry is back under its cap.
+   *
+   * Evicting one per create never converged: after a burst, the map stayed at
+   * whatever high-water mark it reached. A running run is never evicted - it
+   * may have a browser watching it and an approval waiting on a person - so a
+   * genuinely concurrent burst can still exceed the cap, and that is the right
+   * trade.
+   */
   #evict(): void {
     if (this.#runs.size < this.maxRuns) return;
+
     const finished = [...this.#runs.values()]
       .filter((r) => r.status !== "running")
       .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
-    const victim = finished[0];
-    if (victim) this.#runs.delete(victim.id);
+
+    // Room for the one about to be created, hence maxRuns - 1.
+    let over = this.#runs.size - (this.maxRuns - 1);
+    for (const victim of finished) {
+      if (over <= 0) break;
+      this.#runs.delete(victim.id);
+      over -= 1;
+    }
   }
 }

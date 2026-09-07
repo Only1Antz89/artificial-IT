@@ -187,8 +187,12 @@ export class HeuristicBrain implements Brain {
     // Capture the screen once, before touching anything, when the fault is
     // something the user can see. An annotated frame on the ticket is worth
     // more to the next technician than another paragraph of prose.
+    //
+    // Only where the device can actually produce one: a headless host would
+    // turn this into a failed step, and a failed step reads like a fault.
     const tookShot = history.some((h) => h.step.kind === "screenshot");
-    if (!tookShot && VISUAL_CATEGORIES.has(playbook.category)) {
+    const canCapture = input.capabilities?.canCapture ?? true;
+    if (!tookShot && canCapture && VISUAL_CATEGORIES.has(playbook.category)) {
       return {
         steps: [screenshotStep(playbook)],
         resolved: false,

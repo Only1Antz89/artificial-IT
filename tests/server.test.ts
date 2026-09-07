@@ -59,8 +59,13 @@ async function drive(
     while ((index = buffer.indexOf("\n\n")) !== -1) {
       const frame = buffer.slice(0, index);
       buffer = buffer.slice(index + 2);
-      if (!frame.startsWith("data: ")) continue;
-      const event = JSON.parse(frame.slice(6)) as Record<string, unknown>;
+      // A frame is `id: N\ndata: {...}`. A real client uses EventSource, which
+      // parses this for us; this hand-rolled reader has to take the data line.
+      const data = frame
+        .split("\n")
+        .find((line) => line.startsWith("data: "));
+      if (!data) continue;
+      const event = JSON.parse(data.slice(6)) as Record<string, unknown>;
       events.push(event);
       if (event["type"] === "approval-requested" && decide) {
         await decide((event["approval"] as { id: string }).id, runId);
