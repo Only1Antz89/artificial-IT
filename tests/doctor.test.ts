@@ -47,7 +47,7 @@ describe("preflight", () => {
       const report = await runDoctor(port);
       const check = report.checks.find((c) => c.name === `Port ${port}`)!;
       expect(check.state).toBe("warn");
-      expect(check.fix).toMatch(/PORT=/);
+      expect(check.fix).toMatch(/--port/);
     } finally {
       await new Promise<void>((r) => server.close(() => r()));
     }
@@ -73,5 +73,17 @@ describe("preflight", () => {
       expect(capture.fix).not.toMatch(/apt install/i);
       expect(capture.fix).toMatch(/headless/i);
     }
+  });
+});
+
+describe("both listeners", () => {
+  it("checks the portal's port as well as the console's", async () => {
+    // `ait serve` binds two ports. Finding out the second one is taken after
+    // the first has already come up is the surprise this command prevents.
+    const report = await runDoctor(4310);
+    expect(report.checks.some((c) => c.name === "Port 4310")).toBe(true);
+    expect(report.checks.some((c) => c.name === "Port 4311")).toBe(true);
+    const portal = report.checks.find((c) => c.name === "Port 4311")!;
+    expect(portal.detail).toMatch(/portal/i);
   });
 });

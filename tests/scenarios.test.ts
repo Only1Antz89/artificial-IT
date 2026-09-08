@@ -100,6 +100,26 @@ describe("full disk on a MacBook", () => {
   });
 });
 
+describe("what gets drawn on a screenshot", () => {
+  it("does not put DNS annotations on a storage pane", async () => {
+    const r = await run("full-disk");
+    const shot = r.results.find((x) => x.step.kind === "screenshot");
+    const labels = JSON.stringify(shot?.step.payload["annotations"] ?? []);
+    // The bug this replaces: every non-printing playbook fell through to the
+    // DNS annotations, so a full disk was captioned "name lookup is failing".
+    expect(labels).not.toMatch(/name lookup|address is correct/i);
+    expect(labels).toMatch(/volume is full/i);
+  }, 30_000);
+
+  it("annotates the VPN client with what is actually on that screen", async () => {
+    const r = await run("vpn-drop");
+    const shot = r.results.find((x) => x.step.kind === "screenshot");
+    const labels = JSON.stringify(shot?.step.payload["annotations"] ?? []);
+    expect(labels).toMatch(/reconnect loop/i);
+    expect(labels).not.toMatch(/name lookup|spooler/i);
+  }, 30_000);
+});
+
 describe("VPN dropping on hotel wi-fi", () => {
   let r: Run;
   beforeAll(async () => {

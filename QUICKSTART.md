@@ -61,7 +61,16 @@ below.
 npm run serve
 ```
 
-Open **http://localhost:3000**.
+It prints both addresses and starts a listener for each:
+
+```
+  AIT technician console → http://localhost:3000
+  AIT user portal        → http://localhost:3001
+```
+
+If 3000 is taken, `npm run serve -- --port 8080` moves both (the portal follows
+to 8081). `npm run serve -- --single-port` puts them back on one port with the
+portal at `/portal`, which is handy on a laptop with one browser window.
 
 ---
 
@@ -69,8 +78,12 @@ Open **http://localhost:3000**.
 
 Open both, side by side:
 
-- **http://localhost:3000/portal** — what a colleague with a problem sees.
+- **http://localhost:3001** — what a colleague with a problem sees.
 - **http://localhost:3000** — what your technicians see.
+
+They are two ports, not two tabs of one app, and that is the point: on the
+portal's port the technician API does not exist. Try it in front of the room —
+`curl http://localhost:3001/api/desk` returns a 404.
 
 The strongest thing you can do in this demo is hand the portal to someone in the
 room. They describe their problem in their own words and press send; everyone
@@ -78,9 +91,9 @@ else watches it land in the technician inbox and get worked.
 
 What the user sees is deliberately thin: progress in plain language, any question
 AIT needs answered, and the reply. No commands, no rule names, no audit trail.
-That split is enforced in code by an allowlist, not by styling — worth saying
-out loud, because "the user won't see that" is usually a promise rather than a
-property.
+That split is enforced twice — by an allowlist in code and by the two halves
+being on different ports — not by styling. Worth saying out loud, because "the
+user won't see that" is usually a promise rather than a property.
 
 If AIT needs a detail, **the question appears in the portal**, not the console —
 it is the user's question. The technician sees the ticket marked *waiting on
@@ -230,7 +243,8 @@ from the same blank slate every time.
 **Port 3000 is taken.** macOS itself rarely uses 3000, but other dev servers do:
 
 ```bash
-PORT=3100 npm run serve
+npm run serve -- --port 3100     # portal follows to 3101
+PORT=3100 npm run serve          # same thing via the environment
 ```
 
 **`npm install` fails on native modules.** There are none — AIT is pure

@@ -147,7 +147,10 @@ export const PLAYBOOKS: Playbook[] = [
   {
     id: "pb.phishing-report",
     category: "security",
-    match: /\b(phish|phishing|suspicious\s+(e-?mail|message|link)|scam\s+e-?mail|spoofed?|malware|ransomware|virus|clicked\s+(on\s+)?a\s+link)\b/i,
+    // Users rarely write "phishing". They describe the lure: a quota warning, a
+    // link that wants their password, a sender address that looks off. Matching
+    // only the word would miss most real reports of exactly this.
+    match: /\b(phish|phishing|suspicious\s+(e-?mail|message|link|sender)|scam\s+e-?mail|spoofed?|malware|ransomware|virus|clicked\s+(on\s+)?a\s+link)\b|\b(mailbox|account)\b[^\n]{0,30}\bover\s+quota\b|\b(re-?verify|confirm|re-?enter|validate)\b[^\n]{0,20}\b(password|credentials|account\s+details)\b|\b(sender|from)\s+(e-?mail\s+)?address\b[^\n]{0,20}\b(looks?|seems?|is)\b[^\n]{0,15}\b(wrong|odd|strange|off|different)\b/i,
     hypotheses: [
       { statement: "The message is a credential-harvesting phish and nothing was executed on the device.", confidence: "medium" },
       { statement: "An attachment was downloaded and possibly opened, so the endpoint needs checking.", confidence: "medium" },

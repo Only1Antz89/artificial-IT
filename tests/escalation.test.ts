@@ -149,6 +149,42 @@ describe("escalation triggers", () => {
     expect(e.route_to).toBe("security-operations");
   });
 
+  it("says the cause is known when it is, rather than asking for fresh eyes", () => {
+    const e = assessEscalation({
+      ticket: ticket({}),
+      intake,
+      diagnosis: {
+        hypotheses: [],
+        leading_index: 0,
+        confidence: "medium",
+        root_cause: "The volume is full.",
+      },
+      results: [],
+      budgetExhausted: false,
+      resolved: false,
+      wantsHuman: true,
+    });
+    expect(e.triggers).toContain("no-safe-action");
+    expect(e.triggers).not.toContain("low-confidence");
+    expect(e.ask).toMatch(/cause is identified/i);
+    expect(e.ask).not.toMatch(/fresh eyes/i);
+  });
+
+  it("still asks for fresh eyes when nothing was established", () => {
+    const e = assessEscalation({
+      ticket: ticket({}),
+      intake,
+      diagnosis: { hypotheses: [], leading_index: 0, confidence: "low" },
+      results: [],
+      budgetExhausted: false,
+      resolved: false,
+      wantsHuman: true,
+    });
+    expect(e.triggers).toContain("low-confidence");
+    expect(e.triggers).not.toContain("no-safe-action");
+    expect(e.ask).toMatch(/fresh eyes/i);
+  });
+
   it("treats the agent asking for a human as a real trigger, not a fallback", () => {
     const e = assessEscalation({
       ticket: ticket({}),

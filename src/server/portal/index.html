@@ -4,137 +4,210 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>IT Support — report a problem</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23047857'/%3E%3Ctext x='16' y='22' font-family='system-ui,sans-serif' font-size='15' font-weight='700' fill='white' text-anchor='middle'%3E?%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23047857'/%3E%3Ctext x='16' y='22' font-family='system-ui,sans-serif' font-size='13' font-weight='800' fill='white' text-anchor='middle'%3EIT%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/assets/theme.css">
 <style>
+  /*
+   * The user's half.
+   *
+   * Same tokens as the console, different personality. This page is read by
+   * someone who is already having a bad morning and will see it twice a year:
+   * one column, generous spacing, 16px body text, and a green accent that says
+   * "this is fine" rather than the console's operational blue. Everything a
+   * technician needs and a user does not is absent from the markup rather than
+   * hidden by CSS - including from these comments, which ship to the browser
+   * along with everything else on the page.
+   */
   :root{
-    --bg:#f4f6f8; --panel:#fff; --ink:#111827; --muted:#5b6b82; --line:#e3e8ef;
-    --accent:#047857; --accent-ink:#fff;
-    --ok:#036c46; --ok-bg:#e8f7f0; --ok-line:#9fe0c3;
-    --wait:#8a4b06; --wait-bg:#fdf5e6; --wait-line:#f0c67a;
-    --radius:14px;
+    --accent:#047857; --accent-ink:#fff; --accent-soft:#e8f7f0; --accent-line:#9fe0c3;
   }
   @media (prefers-color-scheme:dark){
     :root{
-      --bg:#0b1016; --panel:#151b23; --ink:#eef2f8; --muted:#94a3b8; --line:#232c38;
-      --accent:#34d399; --accent-ink:#06231a;
-      --ok:#6fe0ac; --ok-bg:#052419; --ok-line:#12523a;
-      --wait:#f6c66a; --wait-bg:#251a05; --wait-line:#5c4413;
+      --accent:#34d399; --accent-ink:#06231a; --accent-soft:#082a1e; --accent-line:#12523a;
     }
   }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);
-    font:16px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
-    -webkit-font-smoothing:antialiased}
-  .wrap{max-width:660px;margin:0 auto;padding:34px 20px 60px}
-  header{margin-bottom:26px}
-  h1{margin:0 0 6px;font-size:24px;letter-spacing:-.02em}
-  header p{margin:0;color:var(--muted);font-size:15px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
-    padding:24px}
-  label{display:block;font-weight:600;font-size:14.5px;margin:0 0 6px}
-  .help{color:var(--muted);font-size:13.5px;margin:0 0 8px;font-weight:400}
-  input,textarea,select,button{font:inherit;width:100%;border-radius:10px;
-    border:1px solid var(--line);background:var(--bg);color:var(--ink);padding:11px 13px}
-  textarea{resize:vertical;line-height:1.55}
-  input:focus,textarea:focus,select:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-  .field+.field{margin-top:18px}
-  .consent{display:flex;gap:11px;align-items:flex-start;background:var(--bg);
-    border:1px solid var(--line);border-radius:10px;padding:13px 15px;margin-top:18px}
-  .consent input{width:18px;height:18px;flex:none;margin-top:2px;padding:0}
-  .consent div{font-size:14px;color:var(--muted)}
-  .consent b{color:var(--ink);display:block;margin-bottom:2px;font-size:14.5px}
-  button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);
-    font-weight:650;margin-top:22px;padding:13px}
-  button.primary:disabled{opacity:.55;cursor:progress}
-  .err{margin-top:14px;background:#fef3f2;border:1px solid #f2b3ad;color:#a01b12;
-    border-radius:10px;padding:11px 14px;font-size:14.5px}
-  @media (prefers-color-scheme:dark){.err{background:#2a100e;border-color:#6b2620;color:#ff9d95}}
+  body{font-size:16px;line-height:1.6}
+  .wrap{max-width:680px;margin:0 auto;padding:30px 20px 64px}
 
-  /* tracking */
+  header{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+  header .mark{width:30px;height:30px;border-radius:8px;font-size:11.5px}
+  header .who{font-weight:700;font-size:16px;letter-spacing:-.01em}
+  header .who span{display:block;font-weight:400;font-size:12.5px;color:var(--muted);
+    letter-spacing:.04em;text-transform:uppercase}
+  h1{margin:22px 0 6px;font-size:27px;letter-spacing:-.025em;line-height:1.2}
+  .lede{margin:0 0 26px;color:var(--muted);font-size:15.5px;max-width:52ch}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:26px;box-shadow:var(--shadow-1)}
+
+  label{display:block;font-weight:650;font-size:15px;margin:0 0 5px}
+  .help{color:var(--muted);font-size:13.5px;margin:0 0 9px;font-weight:400}
+  input,textarea,select,button{font:inherit;width:100%;border-radius:var(--radius-sm);
+    border:1px solid var(--line);background:var(--panel-2);color:var(--ink);padding:12px 14px;
+    transition:border-color var(--t-fast),background var(--t-fast)}
+  input:hover,textarea:hover,select:hover{border-color:var(--line-strong)}
+  textarea{resize:vertical;line-height:1.55;min-height:132px}
+  select{cursor:pointer}
+  .field+.field{margin-top:20px}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:20px}
+  @media (max-width:520px){.two{grid-template-columns:1fr}}
+  .two .field{margin-top:0}
+
+  /* Example openers. People freeze at an empty box; one tap fills it. */
+  .examples{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}
+  .examples button{width:auto;font-size:12.5px;padding:6px 12px;border-radius:var(--radius-pill);
+    background:var(--panel-2);color:var(--muted);cursor:pointer;font-weight:500}
+  .examples button:hover{border-color:var(--accent-line);color:var(--accent)}
+
+  .consent{display:flex;gap:12px;align-items:flex-start;background:var(--accent-soft);
+    border:1px solid var(--accent-line);border-radius:var(--radius-sm);padding:15px 16px;margin-top:22px}
+  .consent input{width:18px;height:18px;flex:none;margin-top:2px;padding:0;accent-color:var(--accent)}
+  .consent div{font-size:13.8px;color:var(--ink-2)}
+  .consent b{color:var(--ink);display:block;margin-bottom:3px;font-size:14.5px}
+
+  button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);
+    font-weight:680;margin-top:22px;padding:14px;cursor:pointer;font-size:15.5px}
+  button.primary:hover:not(:disabled){filter:brightness(1.06)}
+  button.primary:disabled{opacity:.6;cursor:progress}
+
+  .err{margin-top:16px;background:var(--stop-bg);border:1px solid var(--stop-line);
+    color:var(--stop);border-radius:var(--radius-sm);padding:12px 15px;font-size:14.5px}
+
+  /* What we will and will not do. Said once, in plain words, up front. */
+  .promise{margin-top:24px;border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px 20px;background:var(--panel)}
+  .promise h2{margin:0 0 11px;font-size:var(--label);letter-spacing:.07em;text-transform:uppercase;
+    color:var(--muted)}
+  .promise ul{margin:0;padding:0;list-style:none;display:grid;gap:9px}
+  .promise li{display:flex;gap:10px;font-size:14px;color:var(--ink-2);align-items:flex-start}
+  .promise li .g{flex:none;width:17px;height:17px;border-radius:50%;margin-top:1px;
+    display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:800}
+  .promise li.yes .g{background:var(--ok-bg);color:var(--ok);border:1px solid var(--ok-line)}
+  .promise li.no  .g{background:var(--stop-bg);color:var(--stop);border:1px solid var(--stop-line)}
+
+  /* ---------------- tracking ---------------- */
   .ref{display:flex;justify-content:space-between;align-items:center;gap:14px;
-    flex-wrap:wrap;margin-bottom:18px}
-  .ref .n{font-family:ui-monospace,monospace;font-size:19px;font-weight:700}
-  .pill{font-size:13px;font-weight:650;padding:5px 13px;border-radius:999px;white-space:nowrap;
-    background:var(--bg);border:1px solid var(--line);color:var(--muted)}
-  .pill.ok{background:var(--ok-bg);border-color:var(--ok-line);color:var(--ok)}
-  .pill.wait{background:var(--wait-bg);border-color:var(--wait-line);color:var(--wait)}
-  .summary{color:var(--muted);font-size:14.5px;margin-bottom:20px}
+    flex-wrap:wrap;padding-bottom:18px;border-bottom:1px solid var(--line);margin-bottom:20px}
+  .ref .n{font-family:var(--mono);font-size:20px;font-weight:700;letter-spacing:-.02em}
+  .ref .n small{display:block;font-family:var(--font);font-size:11.5px;font-weight:500;
+    letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+
+  /* Three states, always visible, so "where is my ticket" needs no reading. */
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:22px}
+  .steps div{font-size:12.5px;color:var(--muted);padding-top:9px;border-top:3px solid var(--line);
+    transition:color var(--t),border-color var(--t)}
+  .steps div.on{color:var(--accent);border-top-color:var(--accent);font-weight:650}
+  .steps div.done{color:var(--ink-2);border-top-color:var(--accent-line)}
+
+  .summary{color:var(--ink-2);font-size:15px;margin-bottom:22px}
+
   ol.timeline{list-style:none;margin:0;padding:0}
   ol.timeline li{position:relative;padding:0 0 20px 26px;font-size:15px}
   ol.timeline li::before{content:"";position:absolute;left:3px;top:7px;width:9px;height:9px;
-    border-radius:50%;background:var(--accent)}
-  ol.timeline li::after{content:"";position:absolute;left:7px;top:19px;bottom:0;width:1px;
+    border-radius:50%;background:var(--accent-line);border:1px solid var(--accent)}
+  ol.timeline li:last-child::before{background:var(--accent)}
+  ol.timeline li::after{content:"";position:absolute;left:7px;top:20px;bottom:0;width:1px;
     background:var(--line)}
   ol.timeline li:last-child{padding-bottom:0}
   ol.timeline li:last-child::after{display:none}
   ol.timeline .t{color:var(--muted);font-size:12.5px;margin-top:3px}
-  .ask{margin-top:22px;border:2px solid var(--accent);border-radius:12px;padding:17px 18px;
-    background:var(--bg)}
-  .ask h3{margin:0 0 4px;font-size:15px;color:var(--accent)}
-  .ask .q{margin:0 0 13px;font-size:15.5px}
+
+  .working{display:flex;align-items:center;gap:10px;margin-top:4px;color:var(--muted);
+    font-size:14px}
+
+  .ask{margin-top:24px;border:2px solid var(--accent);border-radius:var(--radius);padding:18px 19px;
+    background:var(--accent-soft)}
+  .ask h3{margin:0 0 4px;font-size:var(--label);letter-spacing:.07em;text-transform:uppercase;
+    color:var(--accent)}
+  .ask .q{margin:0 0 14px;font-size:15.5px;color:var(--ink)}
   .ask .row{display:flex;gap:9px;flex-wrap:wrap}
-  .ask input{flex:1;min-width:220px}
-  .ask button{width:auto;padding:11px 20px;background:var(--accent);
-    border-color:var(--accent);color:var(--accent-ink);font-weight:650}
-  .reply{margin-top:22px;background:var(--ok-bg);border:1px solid var(--ok-line);
-    border-radius:12px;padding:17px 19px;white-space:pre-wrap;font-size:15.5px}
-  .reply h3{margin:0 0 8px;font-size:13px;letter-spacing:.06em;text-transform:uppercase;
+  .ask input{flex:1;min-width:220px;background:var(--panel)}
+  .ask button{width:auto;padding:12px 22px;background:var(--accent);border-color:var(--accent);
+    color:var(--accent-ink);font-weight:680;cursor:pointer}
+
+  .reply{margin-top:24px;background:var(--ok-bg);border:1px solid var(--ok-line);
+    border-radius:var(--radius);padding:19px 21px;white-space:pre-wrap;font-size:15.5px;
+    color:var(--ink)}
+  .reply h3{margin:0 0 9px;font-size:var(--label);letter-spacing:.07em;text-transform:uppercase;
     color:var(--ok)}
-  .again{margin-top:24px;text-align:center}
-  .again button{width:auto;padding:10px 20px;background:transparent;color:var(--muted)}
-  footer{margin-top:28px;text-align:center;color:var(--muted);font-size:13px}
-  .spin{display:inline-block;width:13px;height:13px;border:2px solid var(--line);
-    border-top-color:var(--accent);border-radius:50%;animation:s .7s linear infinite;
-    vertical-align:-2px;margin-right:7px}
-  @keyframes s{to{transform:rotate(360deg)}}
+
+  .again{margin-top:26px;text-align:center}
+  .again button{width:auto;padding:11px 22px;background:transparent;color:var(--muted);
+    border-color:var(--line);cursor:pointer}
+  .again button:hover{color:var(--ink);border-color:var(--line-strong)}
+
+  footer{margin-top:30px;text-align:center;color:var(--muted);font-size:13px}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <h1>IT Support</h1>
-    <p>Tell us what's going wrong and we'll take a look straight away.</p>
+    <span class="mark">IT</span>
+    <span class="who">IT Support<span>AIT service desk</span></span>
   </header>
 
-  <div class="card" id="form">
-    <div class="field">
-      <label for="desc">What's the problem?</label>
-      <p class="help">In your own words — what you were doing, what happened, and when it started.</p>
-      <textarea id="desc" rows="6"
-        placeholder="The intranet page won't load — it just says the site can't be reached. It started this morning. Everything else seems fine, I can get to Google."></textarea>
-    </div>
+  <div id="form">
+    <h1>What's gone wrong?</h1>
+    <p class="lede">Tell us in your own words. Someone starts looking at it straight
+      away — usually within a few seconds — and you can follow along on this page.</p>
 
-    <div class="field">
-      <label for="name">Your name</label>
-      <input id="name" placeholder="Priya Raman" autocomplete="name">
-    </div>
-
-    <div class="field">
-      <label for="target">Which machine is this about?</label>
-      <select id="target"></select>
-    </div>
-
-    <div class="consent">
-      <input type="checkbox" id="consent" checked>
-      <div>
-        <b>I'm happy for IT to run checks on my machine</b>
-        Only read-only checks run without asking. Anything that would change your
-        machine is shown to a technician first, and we'll never touch passwords,
-        payments or your files.
+    <div class="card">
+      <div class="field">
+        <label for="desc">Describe the problem</label>
+        <p class="help">What you were doing, what happened, and roughly when it started.</p>
+        <textarea id="desc"
+          placeholder="The intranet page won't load — it just says the site can't be reached. It started this morning. Everything else seems fine, I can get to Google."></textarea>
+        <div class="examples" id="examples"></div>
       </div>
+
+      <div class="two">
+        <div class="field">
+          <label for="name">Your name</label>
+          <input id="name" placeholder="Priya Raman" autocomplete="name">
+        </div>
+        <div class="field">
+          <label for="target">Which machine?</label>
+          <select id="target"></select>
+        </div>
+      </div>
+
+      <div class="consent">
+        <input type="checkbox" id="consent" checked>
+        <div>
+          <b>I'm happy for IT to run checks on my machine</b>
+          Only read-only checks run without asking. Anything that would change your
+          machine is shown to a technician first.
+        </div>
+      </div>
+
+      <button class="primary" id="submit">Send it to IT</button>
+      <div id="err"></div>
     </div>
 
-    <button class="primary" id="submit">Send it to IT</button>
-    <div id="err"></div>
+    <div class="promise">
+      <h2>What happens next</h2>
+      <ul>
+        <li class="yes"><span class="g">✓</span><span>Read-only checks run on your machine to find out what's actually wrong.</span></li>
+        <li class="yes"><span class="g">✓</span><span>Anything that would change your machine is shown to a technician first, and can be undone.</span></li>
+        <li class="no"><span class="g">✕</span><span>Passwords, payments, accounts and your files are never touched — those always go to a person.</span></li>
+        <li class="yes"><span class="g">✓</span><span>If it needs a human, it goes to one with everything we found attached. You won't be asked to explain it twice.</span></li>
+      </ul>
+    </div>
   </div>
 
   <div class="card" id="track" hidden>
     <div class="ref">
-      <span class="n" id="ref"></span>
+      <span class="n"><small>Your reference</small><span id="ref"></span></span>
       <span class="pill" id="status"></span>
+    </div>
+    <div class="steps" id="steps">
+      <div data-step="reported">Reported</div>
+      <div data-step="looking">Looking into it</div>
+      <div data-step="answer">Answer</div>
     </div>
     <div class="summary" id="summary"></div>
     <ol class="timeline" id="timeline"></ol>
+    <div id="working"></div>
     <div id="ask"></div>
     <div id="reply"></div>
     <div class="again"><button id="another">Report something else</button></div>
@@ -151,11 +224,34 @@ const time = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", mi
 
 let source = null;
 
+/* ---------------- openers ---------------- */
+
+// Starting a support ticket from a blank box is the hardest part of the whole
+// interaction. These are one tap each, and they are phrased the way people
+// actually write - not as a list of categories.
+const EXAMPLES = [
+  ["Can't reach a site", "The intranet page won't load — it just says the site can't be reached. Everything else seems fine."],
+  ["Nothing prints", "I've sent a document to the printer four times and nothing has come out. The jobs are just sitting there."],
+  ["Machine is slow", "My laptop has been crawling since this morning and the fan is going constantly."],
+  ["Disk is full", "I keep getting a message that my startup disk is almost full and now I can't save anything."],
+  ["Suspicious email", "I got an email saying my mailbox is over quota with a link asking me to re-verify my password. The sender address looks wrong."],
+];
+
+$("examples").innerHTML = EXAMPLES.map(
+  ([label], i) => `<button type="button" data-i="${i}">${esc(label)}</button>`,
+).join("");
+$("examples").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-i]");
+  if (!btn) return;
+  $("desc").value = EXAMPLES[Number(btn.dataset.i)][1];
+  $("desc").focus();
+});
+
 /* ---------------- targets ---------------- */
 
 async function loadTargets() {
   try {
-    const { targets } = await (await fetch("/api/scenarios")).json();
+    const { targets } = await (await fetch("/api/portal/targets")).json();
     const sel = $("target");
     for (const t of targets ?? []) {
       // The user picks a machine, not a simulation. Labels stay plain.
@@ -180,7 +276,7 @@ $("submit").addEventListener("click", async () => {
 
   const btn = $("submit");
   btn.disabled = true;
-  btn.innerHTML = `<span class="spin"></span>Sending…`;
+  btn.innerHTML = `<span class="spin" style="margin-right:8px"></span>Sending…`;
 
   try {
     const res = await fetch("/api/portal/tickets", {
@@ -224,6 +320,14 @@ function watch(reference) {
   };
 }
 
+/** Which of the three states the ticket is in, for the stepper. */
+function stageOf(ticket) {
+  if (ticket.reply) return "answer";
+  if (ticket.status === "resolved" || ticket.status === "escalated") return "answer";
+  if (ticket.updates && ticket.updates.length > 1) return "looking";
+  return "reported";
+}
+
 function show(ticket) {
   $("form").hidden = true;
   $("track").hidden = false;
@@ -236,8 +340,22 @@ function show(ticket) {
     (ticket.status === "resolved" ? " ok" :
      ticket.status === "waiting-on-you" ? " wait" : "");
 
+  const order = ["reported", "looking", "answer"];
+  const at = order.indexOf(stageOf(ticket));
+  for (const el of $("steps").children) {
+    const i = order.indexOf(el.dataset.step);
+    el.className = i < at ? "done" : i === at ? "on" : "";
+  }
+
   $("timeline").innerHTML = ticket.updates.map((u) =>
-    `<li>${esc(u.text)}<div class="t">${esc(time(u.at))}</div></li>`).join("");
+    `<li class="enter">${esc(u.text)}<div class="t">${esc(time(u.at))}</div></li>`).join("");
+
+  // While it is still working, say so rather than leaving a static list that
+  // looks like nothing is happening.
+  const settled = Boolean(ticket.reply) || ticket.status === "resolved";
+  $("working").innerHTML = settled || ticket.question
+    ? ""
+    : `<div class="working"><span class="spin"></span>Still working on it — this page updates on its own.</div>`;
 
   $("ask").innerHTML = ticket.question
     ? `<div class="ask">
@@ -267,7 +385,7 @@ function show(ticket) {
   }
 
   $("reply").innerHTML = ticket.reply
-    ? `<div class="reply"><h3>From IT</h3>${esc(ticket.reply)}</div>` : "";
+    ? `<div class="reply enter"><h3>From IT</h3>${esc(ticket.reply)}</div>` : "";
 }
 
 /* ---------------- come back to an open report ---------------- */

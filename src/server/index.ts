@@ -15,7 +15,7 @@
  *   POST /api/runs/:id/approvals/:approvalId   approve or deny a gated step
  *   GET  /api/runs/:id/evidence/:file          an artefact from the run
  */
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -377,21 +377,118 @@ function startRun(body: StartRunBody, workdir: string): RunSession {
  * Server
  * ------------------------------------------------------------------ */
 
-export async function startServer(
-  port = Number(process.env["PORT"] ?? 3000),
-  workdir = "run-artifacts",
-): Promise<{ port: number; close: () => Promise<void> }> {
-  const consoleHtml = readFileSync(join(here, "console", "index.html"), "utf8");
-  const portalHtml = readFileSync(join(here, "portal", "index.html"), "utf8");
+/**
+ * Which half of the product a listener is allowed to serve.
+ *
+ * `both` is one process on one port, which is convenient and is what the tests
+ * use. `portal` and `console` are the interesting ones: they put the two
+ * audiences on different ports and let each listener serve only its own routes,
+ * so the data boundary is not only the `userView` allowlist but also the fact
+ * that `/api/desk` does not exist on the port the user's browser is pointed at.
+ */
+export type Surface = "console" | "portal" | "both";
 
-  const server = createServer(async (req, res) => {
+export interface ServerOptions {
+  /** Port for the technician console. 0 picks a free one. */
+  port?: number;
+  /**
+   * Port for the user portal.
+   *
+   * Omit for a single listener serving both halves. Set it (the CLI defaults it
+   * to `port + 1`) to run the two surfaces as separate instances over the same
+   * shared state.
+   */
+  portalPort?: number;
+  workdir?: string;
+}
+
+export interface RunningServer {
+  port: number;
+  /** Set when the portal is listening separately. */
+  portalPort?: number;
+  close: () => Promise<void>;
+}
+
+/** Routes only the technician half may serve. */
+function isConsoleRoute(path: string): boolean {
+  return (
+    path === "/" ||
+    path === "/api/desk" ||
+    path === "/api/desk/events" ||
+    path === "/api/scenarios" ||
+    path === "/api/knowledge" ||
+    path === "/api/providers" ||
+    path === "/api/check" ||
+    path === "/api/queue" ||
+    path.startsWith("/api/runs")
+  );
+}
+
+/** Only offer targets that actually exist on this deployment. */
+function availableTargets(): typeof AD_HOC_TARGETS {
+  return AD_HOC_TARGETS.filter((t) => {
+    if (t.key === "this-machine") return localTargetAvailable();
+    if (t.key === "remote-device") return remoteTargetAvailable();
+    return true;
+  });
+}
+
+/** Routes only the user half may serve. */
+function isPortalRoute(path: string): boolean {
+  return path === "/portal" || path === "/portal/" || path.startsWith("/api/portal");
+}
+
+export async function startServer(
+  portOrOptions: number | ServerOptions = Number(process.env["PORT"] ?? 3000),
+  workdirArg = "run-artifacts",
+): Promise<RunningServer> {
+  const options: ServerOptions =
+    typeof portOrOptions === "number"
+      ? { port: portOrOptions, workdir: workdirArg }
+      : portOrOptions;
+  const port = options.port ?? Number(process.env["PORT"] ?? 3000);
+  const workdir = options.workdir ?? workdirArg;
+
+  // The console links to the portal, and where the portal lives depends on how
+  // this was started - and on which port the OS actually handed out, when the
+  // caller asked for 0. So the template is read now and resolved once both
+  // listeners are bound, below.
+  const consoleTemplate = readFileSync(join(here, "console", "index.html"), "utf8");
+  let consoleHtml = consoleTemplate.replaceAll("__PORTAL_URL__", "/portal");
+  const portalHtml = readFileSync(join(here, "portal", "index.html"), "utf8");
+  const themeCss = readFileSync(join(here, "ui", "theme.css"), "utf8");
+
+  const handler = (surface: Surface) => async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     const path = url.pathname;
 
     try {
+      // A listener that does not own a route does not serve it. Not a redirect
+      // and not a 403: on the portal port, the technician API simply is not
+      // there.
+      if (surface === "console" && isPortalRoute(path)) {
+        json(res, 404, { error: "not found" });
+        return;
+      }
+      if (surface === "portal" && isConsoleRoute(path) && path !== "/") {
+        json(res, 404, { error: "not found" });
+        return;
+      }
+
+      // The design tokens both surfaces share, served once from one file so the
+      // two products cannot drift apart by copy-paste.
+      if (req.method === "GET" && path === "/assets/theme.css") {
+        res.writeHead(200, {
+          "Content-Type": "text/css; charset=utf-8",
+          "Cache-Control": "no-cache",
+        });
+        res.end(themeCss);
+        return;
+      }
+
       if (req.method === "GET" && path === "/") {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(consoleHtml);
+        res.end(surface === "portal" ? portalHtml : consoleHtml);
         return;
       }
 
@@ -500,6 +597,15 @@ export async function startServer(
         return;
       }
 
+      // The only thing the user's browser needs from the catalogue: which
+      // machines it may point a report at. `/api/scenarios` carries the whole
+      // technician catalogue - scenario keys, what each demonstrates, the host
+      // platform - and none of that belongs on the user's page.
+      if (req.method === "GET" && path === "/api/portal/targets") {
+        json(res, 200, { targets: availableTargets() });
+        return;
+      }
+
       if (req.method === "GET" && path === "/api/scenarios") {
         json(res, 200, {
           simulated: SCENARIOS.map((s) => ({
@@ -512,12 +618,7 @@ export async function startServer(
           localAvailable: hostPlatform() !== "unknown",
           hostPlatform: hostPlatform(),
           // Targets an ad-hoc ticket can be pointed at.
-          // Only offer targets that actually exist on this deployment.
-          targets: AD_HOC_TARGETS.filter((t) => {
-            if (t.key === "this-machine") return localTargetAvailable();
-            if (t.key === "remote-device") return remoteTargetAvailable();
-            return true;
-          }),
+          targets: availableTargets(),
         });
         return;
       }
@@ -693,19 +794,51 @@ export async function startServer(
     } catch (err) {
       json(res, 500, { error: err instanceof Error ? err.message : String(err) });
     }
-  });
+  };
 
-  await new Promise<void>((resolve) => server.listen(port, resolve));
-  const actualPort = (server.address() as { port: number }).port;
-  console.log(`\n  AIT technician console → http://localhost:${actualPort}\n`);
+  const listen = async (srv: Server, p: number): Promise<number> => {
+    await new Promise<void>((resolve) => srv.listen(p, resolve));
+    return (srv.address() as { port: number }).port;
+  };
+
+  const split = options.portalPort !== undefined;
+  const consoleServer = createServer(handler(split ? "console" : "both"));
+  const actualPort = await listen(consoleServer, port);
+
+  let portalServer: Server | undefined;
+  let actualPortalPort: number | undefined;
+  if (split) {
+    portalServer = createServer(handler("portal"));
+    actualPortalPort = await listen(portalServer, options.portalPort!);
+  }
+
+  if (actualPortalPort !== undefined) {
+    consoleHtml = consoleTemplate.replaceAll(
+      "__PORTAL_URL__",
+      `http://localhost:${actualPortalPort}/`,
+    );
+  }
+
+  console.log(`\n  AIT technician console → http://localhost:${actualPort}`);
+  console.log(
+    `  AIT user portal        → http://localhost:${actualPortalPort ?? actualPort}${
+      split ? "" : "/portal"
+    }\n`,
+  );
+
+  const shut = (srv: Server) =>
+    new Promise<void>((resolve) => {
+      srv.closeAllConnections();
+      srv.close(() => resolve());
+    });
 
   return {
     port: actualPort,
-    close: () =>
-      new Promise<void>((resolve) => {
-        server.closeAllConnections();
-        server.close(() => resolve());
-      }),
+    ...(actualPortalPort !== undefined ? { portalPort: actualPortalPort } : {}),
+    close: async () => {
+      await shut(consoleServer);
+      if (portalServer) await shut(portalServer);
+    },
   };
 }
 

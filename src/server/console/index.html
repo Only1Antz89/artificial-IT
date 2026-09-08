@@ -4,43 +4,41 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AIT — Technician Console</title>
+<link rel="stylesheet" href="/assets/theme.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231a56db'/%3E%3Ctext x='16' y='22' font-family='system-ui,sans-serif' font-size='15' font-weight='700' fill='white' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E">
 <style>
+  /*
+   * The technician's half.
+   *
+   * Same tokens as the portal, different personality. This is a tool someone
+   * sits in front of for a shift: denser type, more information per screen, a
+   * blue that reads as operational rather than reassuring, and monospace
+   * wherever a real command or hostname appears. The portal is a document; this
+   * is an instrument panel.
+   *
+   * Only what differs from `/assets/theme.css` lives here. Anything that should
+   * look identical on both surfaces - status colours, shape, focus, motion -
+   * belongs in the shared file, not in this one.
+   */
   :root{
-    --bg:#f6f7f9; --panel:#fff; --panel-2:#fbfcfd; --ink:#0f1729; --muted:#5b6b82;
-    --line:#e3e8ef; --accent:#1a56db; --accent-ink:#fff;
-    --ok:#036c46; --ok-bg:#e8f7f0; --ok-line:#9fe0c3;
-    --warn:#8a4b06; --warn-bg:#fdf5e6; --warn-line:#f0c67a;
-    --stop:#a01b12; --stop-bg:#fdeeed; --stop-line:#f2b3ad;
-    --code-bg:#0f1729; --code-ink:#c9d7f0;
-    --radius:12px;
+    --accent:#1a56db; --accent-ink:#fff; --accent-soft:#eaf0ff; --accent-line:#b9ccfb;
   }
   @media (prefers-color-scheme:dark){
     :root{
-      --bg:#0a0e17; --panel:#131926; --panel-2:#0f1421; --ink:#eef2f8; --muted:#93a3ba;
-      --line:#222c3e; --accent:#6f9bff; --accent-ink:#08111f;
-      --ok:#6fe0ac; --ok-bg:#052419; --ok-line:#12523a;
-      --warn:#f6c66a; --warn-bg:#251a05; --warn-line:#5c4413;
-      --stop:#ff9d95; --stop-bg:#2a100e; --stop-line:#6b2620;
-      --code-bg:#070b13; --code-ink:#b9cbe8;
+      --accent:#6f9bff; --accent-ink:#08111f; --accent-soft:#10192c; --accent-line:#2a3d63;
     }
   }
-  *{box-sizing:border-box}
-  html,body{margin:0;height:100%}
-  body{
-    background:var(--bg); color:var(--ink);
-    font:14.5px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
-    -webkit-font-smoothing:antialiased;
-  }
-  code,pre,.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace}
+  html,body{height:100%}
+  body{font-size:14.5px;line-height:1.55}
 
   header{
     border-bottom:1px solid var(--line); background:var(--panel);
     padding:14px 22px; display:flex; align-items:center; gap:16px;
     flex-wrap:wrap; position:sticky; top:0; z-index:20;
   }
-  .brand{font-weight:700; font-size:15.5px; letter-spacing:-.01em}
-  .brand span{color:var(--muted); font-weight:400}
+  .brand{font-weight:700; font-size:15px; letter-spacing:-.01em; line-height:1.25}
+  .brand span{display:block; color:var(--muted); font-weight:400; font-size:11.5px;
+    letter-spacing:.05em; text-transform:uppercase}
   .chips{display:flex; gap:7px; flex-wrap:wrap; margin-left:auto}
   .chip{
     font-size:11.5px; padding:3.5px 10px; border-radius:999px;
@@ -90,8 +88,16 @@
 
   /* timeline */
   .stage{min-height:60vh}
-  .empty{color:var(--muted); text-align:center; padding:70px 20px}
-  .empty h3{margin:0 0 6px; color:var(--ink); font-size:16px}
+  .empty{color:var(--muted); text-align:center; padding:64px 24px;
+    display:flex; flex-direction:column; align-items:center}
+  .empty h3{margin:0 0 6px; color:var(--ink); font-size:17px; letter-spacing:-.01em}
+  .empty p{margin:0; max-width:44ch}
+  .empty .hints{list-style:none; margin:26px 0 0; padding:0; text-align:left;
+    display:grid; gap:10px; max-width:46ch}
+  .empty .hints li{font-size:12.8px; line-height:1.5; padding-left:15px; position:relative}
+  .empty .hints li::before{content:""; position:absolute; left:0; top:7px; width:5px; height:5px;
+    border-radius:50%; background:var(--accent-line)}
+  .empty .hints b{color:var(--ink-2); font-weight:650}
 
   .runhead{display:flex; align-items:flex-start; gap:14px; flex-wrap:wrap;
     padding:15px 17px; border-bottom:1px solid var(--line)}
@@ -234,8 +240,9 @@
 <body>
 
 <header>
-  <div class="brand">AIT <span>— technician console</span></div>
-  <a class="portal-link" href="/portal" target="_blank" rel="noopener">User portal ↗</a>
+  <span class="mark">AIT</span>
+  <div class="brand">Technician console<span>Artificial IT · service desk</span></div>
+  <a class="portal-link" href="__PORTAL_URL__" target="_blank" rel="noopener">User portal ↗</a>
   <div class="chips" id="providerChips"><span class="chip">checking providers…</span></div>
 </header>
 
@@ -246,7 +253,7 @@
       <div class="body" style="padding:0">
         <div id="inbox" class="inbox">
           <div class="none">Nothing reported yet. Open the
-            <a href="/portal" target="_blank" rel="noopener">user portal</a> and send one in.</div>
+            <a href="__PORTAL_URL__" target="_blank" rel="noopener">user portal</a> and send one in.</div>
         </div>
       </div>
     </section>
@@ -268,6 +275,7 @@
           <div class="field">
             <label for="target">Which machine?</label>
             <select id="target"></select>
+            <p class="hint" id="targetNote"></p>
           </div>
         </div>
 
@@ -319,9 +327,16 @@
   <main>
     <section class="card stage" id="stage">
       <div class="empty">
+        <span class="mark" style="width:44px;height:44px;border-radius:12px;font-size:15px;
+          margin-bottom:16px;background:var(--accent-soft);color:var(--accent)">AIT</span>
         <h3>Nothing running</h3>
-        <p>Pick a ticket and press Run. Steps stream in live, and anything that<br>
-           needs a technician's sign-off will stop and ask you here.</p>
+        <p>Type a ticket on the left, pick a prepared one, or wait for a report to
+           arrive from the user portal.</p>
+        <ul class="hints">
+          <li><b>Every step is gated.</b> A verdict is recorded before anything reaches the device.</li>
+          <li><b>You are asked, not told.</b> Changes stop here for sign-off, and stay undoable for 15 minutes.</li>
+          <li><b>Questions go to the user.</b> If AIT needs a detail, it appears on their page, not yours.</li>
+        </ul>
       </div>
     </section>
   </main>
@@ -373,8 +388,12 @@ async function loadScenarios() {
   scenarios = await (await fetch("/api/scenarios")).json();
 
   const targets = $("target");
+  // The note goes under the select, not into the option label: a select clips
+  // its text, so "This machine — Real commands ag…" told the technician less
+  // than the label alone would have.
+  TARGET_NOTES = Object.fromEntries((scenarios.targets ?? []).map((t) => [t.key, t.note]));
   for (const t of scenarios.targets ?? []) {
-    const opt = new Option(`${t.label} — ${t.note}`, t.key);
+    const opt = new Option(t.label, t.key);
     targets.append(opt);
   }
 
@@ -400,6 +419,9 @@ async function loadScenarios() {
   }
   sel.addEventListener("change", showHint);
   showHint();
+
+  $("target").addEventListener("change", showTargetNote);
+  showTargetNote();
 }
 
 function meta(key) {
@@ -407,6 +429,11 @@ function meta(key) {
 }
 function showHint() {
   $("scenarioHint").textContent = meta($("scenario").value)?.demonstrates ?? "";
+}
+
+let TARGET_NOTES = {};
+function showTargetNote() {
+  $("targetNote").textContent = TARGET_NOTES[$("target").value] ?? "";
 }
 
 /* ---------------- guardrail checker ---------------- */

@@ -105,9 +105,13 @@ export function assessEscalation(input: EscalationInput): Escalation {
 
   // The agent ran out of things it could safely try. That is a real trigger,
   // not a fallback: it is the honest answer on a ticket whose fix is a decision
-  // rather than a command.
+  // rather than a command. Which of the two it is depends on whether a cause
+  // was actually established - "fresh eyes needed" on a ticket where the cause
+  // is sitting in the write-up sends the technician looking for nothing.
   if (input.wantsHuman && !resolved) {
-    triggers.add("low-confidence");
+    const established =
+      Boolean(diagnosis?.root_cause) && diagnosis?.confidence !== "low";
+    triggers.add(established ? "no-safe-action" : "low-confidence");
   }
 
   // Someone who cannot work, or a VIP, should not sit in a queue behind a bot.
@@ -203,6 +207,9 @@ function askFor(triggers: EscalationTrigger[]): string {
   }
   if (triggers.includes("needs-hands-on")) {
     return "This needs someone physically at the device.";
+  }
+  if (triggers.includes("no-safe-action")) {
+    return "The cause is identified and in the write-up. There is no safe automated action for it, so it needs a person to decide.";
   }
   if (triggers.includes("low-confidence")) {
     return "Diagnosis did not get above low confidence. Fresh eyes needed on the evidence collected.";

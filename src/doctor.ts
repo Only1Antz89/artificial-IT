@@ -56,7 +56,11 @@ export async function runDoctor(port = 3000): Promise<DoctorReport> {
     checks.push(...(await screenCapture(host)));
   }
 
-  checks.push(await portFree(port));
+  // Both ports, because `ait serve` binds both. Finding out the portal's port
+  // was taken *after* the console came up is exactly the surprise this command
+  // exists to prevent.
+  checks.push(await portFree(port, "the console"));
+  checks.push(await portFree(port + 1, "the user portal"));
   checks.push(...(await providers()));
   checks.push(evidenceWritable());
 
@@ -186,7 +190,7 @@ async function screenCapture(host: HostPlatform): Promise<DoctorCheck[]> {
   return out;
 }
 
-async function portFree(port: number): Promise<DoctorCheck> {
+async function portFree(port: number, forWhat: string): Promise<DoctorCheck> {
   const free = await new Promise<boolean>((resolve) => {
     const server = createServer();
     server.once("error", () => resolve(false));
@@ -195,13 +199,13 @@ async function portFree(port: number): Promise<DoctorCheck> {
   });
 
   if (free) {
-    return { name: `Port ${port}`, state: "ok", detail: "free for the console" };
+    return { name: `Port ${port}`, state: "ok", detail: `free for ${forWhat}` };
   }
   return {
     name: `Port ${port}`,
     state: "warn",
-    detail: `something is already listening on ${port}.`,
-    fix: `Start the console on another port: PORT=3100 npm run serve`,
+    detail: `something is already listening on ${port}, which ${forWhat} needs.`,
+    fix: `Move both: npm run serve -- --port ${port + 100}`,
   };
 }
 

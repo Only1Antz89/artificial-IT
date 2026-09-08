@@ -128,7 +128,18 @@ export function deriveSubject(description: string): string {
     ?.trim();
   const candidate = firstSentence && firstSentence.length >= 8 ? firstSentence : description.trim();
   const cleaned = candidate.replace(/\s+/g, " ");
-  return cleaned.length > 90 ? `${cleaned.slice(0, 87)}…` : cleaned;
+  if (cleaned.length <= 90) return cleaned;
+
+  // Cut at a word boundary. A subject line ending "re-verify my pa…" is the
+  // first thing the user reads back on their own ticket, and it reads as a
+  // glitch rather than as a summary.
+  const cut = cleaned.slice(0, 87);
+  const lastSpace = cut.lastIndexOf(" ");
+  const trimmed = (lastSpace > 50 ? cut.slice(0, lastSpace) : cut).replace(
+    /[\s,;:.\-]+$/,
+    "",
+  );
+  return `${trimmed}…`;
 }
 
 /** True when an ad-hoc ticket can be pointed at the real host. */

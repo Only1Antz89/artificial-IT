@@ -86,9 +86,20 @@ describe("static surface", () => {
     const res = await fetch(`${base}/`);
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain("technician console");
-    // The favicon is inlined so the page makes no extra request for one.
+    expect(html.toLowerCase()).toContain("technician console");
+    // The favicon stays inlined; the one external request the page makes is
+    // for the design tokens both surfaces share.
     expect(html).toContain('rel="icon"');
+    expect(html).toContain('href="/assets/theme.css"');
+  });
+
+  it("serves the shared design tokens to both surfaces", async () => {
+    const css = await (await fetch(`${base}/assets/theme.css`)).text();
+    expect(css).toContain("--accent");
+    expect(css).toContain("--radius");
+    // The tokens are the shared half; each surface sets its own accent, so the
+    // shared file must not be the thing that decides the colour of either.
+    expect(css).toContain("prefers-color-scheme: dark");
   });
 
   it("lists both simulated and local scenarios", async () => {

@@ -87,6 +87,23 @@ export function annotate(
       ? "Live screen capture"
       : "Rendered from device state (not a photograph of the screen)";
 
+  // Where each label has already been put, so the next one can be moved out of
+  // the way. Two annotations on nearby regions used to stack their labels on
+  // the same spot, and the one underneath was simply unreadable - which is
+  // worse than no annotation, because the technician cannot tell it is there.
+  const placed: { x: number; y: number; w: number; h: number }[] = [];
+
+  // Labels also keep off the *other* regions being highlighted - a label
+  // covering the very thing another annotation is pointing at defeats both.
+  // A label sitting under its own region is fine and is what normally happens,
+  // so each annotation's own box is excluded when it is placed.
+  const regions = annotations.map((a) => ({
+    x: a.box.x,
+    y: a.box.y,
+    w: a.box.width,
+    h: a.box.height,
+  }));
+
   const marks = annotations
     .map((a, index) => {
       const colors = PALETTE[a.style];
@@ -94,10 +111,37 @@ export function annotate(
       const lines = wrap(a.label, 34);
       const labelWidth = Math.max(...lines.map((l) => l.length)) * 7.1 + 34;
       const labelHeight = lines.length * 16 + 14;
+      const labelX = Math.min(Math.max(x, 8), Math.max(8, width - labelWidth - 8));
+
       // Keep the label inside the frame: flip above the box when it would
       // otherwise fall off the bottom.
-      const labelY = y + h + 8 + labelHeight > height ? y - labelHeight - 8 : y + h + 8;
-      const labelX = Math.min(Math.max(x, 8), Math.max(8, width - labelWidth - 8));
+      let labelY = y + h + 8 + labelHeight > height ? y - labelHeight - 8 : y + h + 8;
+
+      // Then slide it clear of anything already drawn. Downwards first, since
+      // that is where there is usually room; if that runs out of frame, go back
+      // up above everything instead.
+      const obstacles = [...placed, ...regions.filter((_, i) => i !== index)];
+      const hits = (ly: number) =>
+        obstacles.find(
+          (p) =>
+            labelX < p.x + p.w &&
+            labelX + labelWidth > p.x &&
+            ly < p.y + p.h &&
+            ly + labelHeight > p.y,
+        );
+      for (let guard = 0; guard < obstacles.length + 1; guard += 1) {
+        const clash = hits(labelY);
+        if (!clash) break;
+        labelY = clash.y + clash.h + 6;
+      }
+      if (labelY + labelHeight > height) {
+        labelY = Math.max(
+          8,
+          Math.min(...obstacles.map((p) => p.y), height) - labelHeight - 6,
+        );
+      }
+      labelY = Math.max(4, Math.min(labelY, height - labelHeight - 4));
+      placed.push({ x: labelX, y: labelY, w: labelWidth, h: labelHeight });
 
       const arrow = a.arrowFrom
         ? `<line x1="${a.arrowFrom.x}" y1="${a.arrowFrom.y}" x2="${x + w / 2}" y2="${y + h / 2}" stroke="${colors.stroke}" stroke-width="2.5" marker-end="url(#arrow-${a.style})" opacity="0.9"/>`

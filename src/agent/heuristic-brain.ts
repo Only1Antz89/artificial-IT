@@ -28,6 +28,7 @@ import type {
   ProposeInput,
   ProposeOutput,
 } from "./brain.js";
+import type { Annotation } from "../execution-plane/annotate.js";
 import { extractSymptoms } from "./symptoms.js";
 import {
   findPlaybook,
@@ -782,34 +783,90 @@ const VISUAL_CATEGORIES = new Set(["printing", "connectivity", "storage"]);
  * `src/demo/screen.ts`. On a real endpoint these would come from the model
  * looking at the captured frame.
  */
+/**
+ * Where to draw on the frame, per playbook.
+ *
+ * Keyed by playbook id rather than by category, and with no catch-all. The
+ * previous version fell back to the DNS annotations for anything that was not
+ * printing, which put "name lookup is failing" on a storage pane the moment a
+ * second visual category existed. A wrong annotation is worse than none: it is
+ * the one part of the evidence a technician reads as a conclusion.
+ *
+ * Coordinates are against the 900x560 frames in `src/demo/screen.ts`. A
+ * playbook with no entry here gets a plain capture, which is still worth
+ * having - it is what the user is looking at.
+ */
+const ANNOTATIONS: Record<string, { caption: string; marks: Annotation[] }> = {
+  "pb.dns-resolution": {
+    caption: "Browser error at the point the user reported the fault",
+    marks: [
+      {
+        style: "problem" as const,
+        box: { x: 240, y: 228, width: 430, height: 96 },
+        label: "Name lookup is failing, not the connection itself",
+      },
+      {
+        style: "action" as const,
+        box: { x: 56, y: 88, width: 792, height: 42 },
+        label: "Address is correct, so the request never left the machine",
+        arrowFrom: { x: 700, y: 200 },
+      },
+    ],
+  },
+  "pb.print-spooler": {
+    caption: "Print queue at the point the user reported the fault",
+    marks: [
+      {
+        style: "problem" as const,
+        box: { x: 52, y: 122, width: 520, height: 30 },
+        label: "Queue is paused - the spooler service is not running",
+      },
+      {
+        style: "info" as const,
+        box: { x: 620, y: 200, width: 210, height: 180 },
+        label: "Every job is sitting in Error state",
+      },
+    ],
+  },
+  "pb.disk-space": {
+    caption: "Storage pane at the point the user reported the fault",
+    marks: [
+      {
+        // The usage bar, plus the warning line macOS prints under it.
+        style: "problem" as const,
+        box: { x: 92, y: 140, width: 716, height: 78 },
+        label: "Volume is full - the pale sliver on the right is all that is left",
+      },
+      {
+        // The category breakdown, well below the bar so the labels have room.
+        style: "info" as const,
+        box: { x: 92, y: 224, width: 716, height: 118 },
+        label: "Where the space went, largest first",
+        arrowFrom: { x: 830, y: 440 },
+      },
+    ],
+  },
+  "pb.vpn-drop": {
+    caption: "VPN client at the point the user reported the fault",
+    marks: [
+      {
+        // Status line and the signal meter, which sit on the same band.
+        style: "problem" as const,
+        box: { x: 92, y: 128, width: 560, height: 52 },
+        label: "Reconnect loop on a two-of-five signal - the link, not the tunnel",
+      },
+      {
+        style: "info" as const,
+        box: { x: 92, y: 282, width: 560, height: 132 },
+        label: "Up and down four times in five minutes",
+        arrowFrom: { x: 800, y: 470 },
+      },
+    ],
+  },
+};
+
 function screenshotStep(playbook: Playbook): PlanStep {
-  const annotations =
-    playbook.category === "printing"
-      ? [
-          {
-            style: "problem" as const,
-            box: { x: 52, y: 122, width: 520, height: 30 },
-            label: "Queue is paused - the spooler service is not running",
-          },
-          {
-            style: "info" as const,
-            box: { x: 620, y: 200, width: 210, height: 180 },
-            label: "Every job is sitting in Error state",
-          },
-        ]
-      : [
-          {
-            style: "problem" as const,
-            box: { x: 240, y: 228, width: 430, height: 96 },
-            label: "Name lookup is failing, not the connection itself",
-          },
-          {
-            style: "action" as const,
-            box: { x: 56, y: 88, width: 792, height: 42 },
-            label: "Address is correct, so the request never left the machine",
-            arrowFrom: { x: 700, y: 200 },
-          },
-        ];
+  const entry = ANNOTATIONS[playbook.id];
 
   return {
     id: newId("step"),
@@ -817,10 +874,8 @@ function screenshotStep(playbook: Playbook): PlanStep {
     intent: "Capture what the user is seeing, and mark up the part that matters",
     payload: {
       caption:
-        playbook.category === "printing"
-          ? "Print queue at the point the user reported the fault"
-          : "Browser error at the point the user reported the fault",
-      annotations,
+        entry?.caption ?? "What the user is seeing at the point they reported the fault",
+      ...(entry ? { annotations: entry.marks } : {}),
     },
     mutating: false,
   };

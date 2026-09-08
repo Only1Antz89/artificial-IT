@@ -14,6 +14,16 @@ export const EscalationTrigger = z.enum([
   "requires-authority",
   /** Diagnosis never got above low confidence. */
   "low-confidence",
+  /**
+   * The cause is established, but no safe automated action exists for it.
+   *
+   * A full disk, a weak radio, a downloaded attachment: the agent knows exactly
+   * what is wrong and the fix is a decision - delete these files, move rooms,
+   * quarantine this device - not a command. Distinct from `low-confidence`,
+   * which says the opposite, and reporting one as the other tells the
+   * technician to go looking for something that has already been found.
+   */
+  "no-safe-action",
   /** Remediation attempts kept failing. */
   "repeated-failure",
   /** The request is not an IT technician task at all. */

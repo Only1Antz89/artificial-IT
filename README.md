@@ -12,7 +12,7 @@ not a prompt, and it does not consult the model.
 ```bash
 npm install
 npm run doctor        # preflight: will this actually work here?
-npm run serve         # technician console on http://localhost:3000
+npm run serve         # console on :3000, user portal on :3001
 npm run demo          # every simulated scenario, in the terminal
 npm run local         # run against THIS machine
 ```
@@ -26,27 +26,43 @@ No API key needed for any of the above. Setting one up on a Mac for a live demo:
 
 AIT has two front doors, because it has two audiences.
 
-**`/portal` — the person with the problem.** They describe it in their own
+**The user portal — the person with the problem.** They describe it in their own
 words, say whether IT may run checks on their machine, and then watch progress
 in plain language: *"we're checking a few things"*, *"a technician is checking
 before we change anything"*, and finally the reply. If AIT needs one more
 detail, **the question arrives here**, because it is their question to answer.
 
-**`/` — the technician.** Tickets from the portal appear in an inbox live, with
+**The technician console.** Tickets from the portal appear in an inbox live, with
 who reported them and their state. A technician opens one and sees everything:
 the commands, the output, the annotated screenshots, which guardrail fired and
 why, the approval gate, the write-up, the audit trail.
 
-The split is enforced rather than styled. `userView()` in
-`src/server/tickets.ts` is an **allowlist** — the portal can only ever be sent
-fields that are named there, so a technician-only field added later cannot leak
-into it by being forgotten. There is a test that pins the exact key set.
+The split is enforced twice, rather than styled.
+
+`userView()` in `src/server/tickets.ts` is an **allowlist** — the portal can
+only ever be sent fields that are named there, so a technician-only field added
+later cannot leak into it by being forgotten. There is a test that pins the
+exact key set.
+
+And the two halves listen on **separate ports**, each serving only its own
+routes. On the port the user's browser is pointed at, `/api/desk` is not a
+forbidden route; it is not a route at all. `tests/surfaces.test.ts` checks both
+directions.
 
 ```bash
 npm run serve
 # technician console → http://localhost:3000
-# user portal        → http://localhost:3000/portal
+# user portal        → http://localhost:3001
+
+npm run serve -- --port 8080        # both move; portal lands on :8081
+npm run serve -- --single-port      # one port, portal at /portal
 ```
+
+Visually they are two products from one company: the same design tokens, served
+to both from `/assets/theme.css`, with each surface setting its own accent and
+density on top. The console is dense, blue and operational — someone sits in
+front of it for a shift. The portal is a calm one-column document in green,
+read twice a year by someone already having a bad morning.
 
 For a demo, put them side by side: submit from the portal on one screen and
 watch it get worked on the other.
@@ -204,6 +220,11 @@ mutating runs for the rest of the ticket — but the read-only diagnosis carries
 on, so the technician who picks it up gets "I would not delete your files, and
 here is what is actually filling the disk" rather than a dead end. A run that
 was frozen is never reported as resolved, however clean the checks came back.
+
+When AIT stops, it says *which kind* of stop it is. "No safe automated action
+exists for this" and "the diagnosis never got above low confidence" are opposite
+situations, and reporting the first as the second sends a technician looking for
+something that is already written up.
 
 Escalations route by the risk category that fired, not to a single queue:
 security controls and data exfiltration go to security operations, compliance to

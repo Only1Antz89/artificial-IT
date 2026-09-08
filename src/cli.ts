@@ -523,7 +523,9 @@ ${c.bold("AIT")} — AI IT technician
   ait scenarios               list every scenario
   ait providers               show which providers are configured and verified
   ait check "<command>"       ask the guardrails about a command without running it
-  ait serve                   start the technician console on :3000
+  ait serve                   console on :3000, user portal on :3001
+  ait serve --port 8080       move both (portal lands on :8081)
+  ait serve --single-port     both halves on one port, portal at /portal
 
 Providers are chosen by AIT_PROVIDER, or automatically from whichever of
 ANTHROPIC_API_KEY / OPENAI_API_KEY is set. With neither, AIT runs its
@@ -563,7 +565,21 @@ async function main(): Promise<void> {
       break;
     case "serve": {
       const { startServer } = await import("./server/index.js");
-      await startServer();
+      const port = Number(readFlag(args, "--port") ?? process.env["PORT"] ?? 3000);
+      // Two ports by default. The two halves have different audiences, and
+      // giving each its own listener means the portal's browser tab cannot
+      // reach the technician API at all - the data boundary stops being only
+      // an allowlist in code and becomes a route that is not there.
+      // `--single-port` puts both back on one, with the portal at /portal.
+      const single = args.includes("--single-port");
+      const portalPort = single
+        ? undefined
+        : Number(readFlag(args, "--portal-port") ?? port + 1);
+      await startServer({
+        port,
+        ...(portalPort !== undefined ? { portalPort } : {}),
+        workdir: readFlag(args, "--workdir") ?? "run-artifacts",
+      });
       break;
     }
     default:

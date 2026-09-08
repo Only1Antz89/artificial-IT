@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { annotate, type Annotation } from "../src/execution-plane/annotate.js";
+import type { ScreenCapture } from "../src/execution-plane/device.js";
 import { EvidenceStore } from "../src/execution-plane/evidence-store.js";
 import { browserScreen, printQueueScreen } from "../src/demo/screen.js";
 
@@ -121,5 +122,71 @@ describe("evidence store", () => {
     expect(a.sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(a.size_bytes).toBe(5);
     expect(a.caption).toBe("greeting");
+  });
+});
+
+describe("placing labels so they can be read", () => {
+  const frame: ScreenCapture = {
+    source: "rendered",
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="560"></svg>',
+    width: 900,
+    height: 560,
+    description: "test frame",
+  };
+
+  /** Every label rectangle the renderer drew, in document order. */
+  function labelBoxes(svg: string): { x: number; y: number; w: number; h: number }[] {
+    // The label plate is the white rect inside each annotation group.
+    return [...svg.matchAll(
+      /<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" fill="#ffffff"/g,
+    )].map((m) => ({
+      x: Number(m[1]),
+      y: Number(m[2]),
+      w: Number(m[3]),
+      h: Number(m[4]),
+    }));
+  }
+
+  const overlaps = (
+    a: { x: number; y: number; w: number; h: number },
+    b: { x: number; y: number; w: number; h: number },
+  ) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
+  it("does not stack two labels on the same spot", () => {
+    // Two regions 20px apart: their labels would land on each other unless
+    // something moves them.
+    const svg = annotate(frame, [
+      { style: "problem", box: { x: 90, y: 120, width: 500, height: 40 }, label: "The first thing that is wrong here" },
+      { style: "info", box: { x: 90, y: 180, width: 500, height: 40 }, label: "The second thing that is wrong here" },
+    ]);
+    const boxes = labelBoxes(svg);
+    expect(boxes).toHaveLength(2);
+    expect(overlaps(boxes[0]!, boxes[1]!)).toBe(false);
+  });
+
+  it("keeps a label off another annotation's region", () => {
+    const regionB = { x: 90, y: 190, width: 500, height: 120 };
+    const svg = annotate(frame, [
+      { style: "problem", box: { x: 90, y: 120, width: 500, height: 40 }, label: "Points at the top band" },
+      { style: "info", box: regionB, label: "Points at the block below it" },
+    ]);
+    const first = labelBoxes(svg)[0]!;
+    expect(
+      overlaps(first, { x: regionB.x, y: regionB.y, w: regionB.width, h: regionB.height }),
+    ).toBe(false);
+  });
+
+  it("keeps every label inside the frame", () => {
+    const svg = annotate(frame, [
+      { style: "problem", box: { x: 40, y: 480, width: 800, height: 60 }, label: "Right at the bottom edge of the capture" },
+      { style: "info", box: { x: 40, y: 500, width: 800, height: 40 }, label: "And another one just below it" },
+      { style: "action", box: { x: 40, y: 520, width: 800, height: 30 }, label: "And a third, with nowhere obvious to go" },
+    ]);
+    for (const b of labelBoxes(svg)) {
+      expect(b.y).toBeGreaterThanOrEqual(0);
+      expect(b.y + b.h).toBeLessThanOrEqual(560);
+      expect(b.x).toBeGreaterThanOrEqual(0);
+      expect(b.x + b.w).toBeLessThanOrEqual(900);
+    }
   });
 });
