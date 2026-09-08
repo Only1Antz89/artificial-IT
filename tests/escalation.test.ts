@@ -99,8 +99,80 @@ describe("escalation triggers", () => {
       resolved: false,
     });
     expect(e.triggers).toContain("policy-block");
-    expect(e.route_to).toBe("service-desk-tier-2");
+    // A credentials block is an identity decision, not a desk one.
+    expect(e.route_to).toBe("identity-and-access");
     expect(e.urgency).toBe("high");
+  });
+
+  it("routes each blocked risk category to the team that owns it", () => {
+    const cases: [string, string][] = [
+      ["security-controls", "security-operations"],
+      ["data-exfiltration", "security-operations"],
+      ["compliance", "information-governance"],
+      ["finance", "finance-systems"],
+      ["identity", "identity-and-access"],
+      ["network-infrastructure", "network-engineering"],
+    ];
+    for (const [category, team] of cases) {
+      const e = assessEscalation({
+        ticket: ticket({}),
+        intake,
+        results: [
+          result({
+            outcome: "blocked",
+            verdict: {
+              decision: "block",
+              categories: [category as never],
+              reason: "no",
+              rule_id: `block.${category}`,
+              escalate: true,
+            },
+          }),
+        ],
+        budgetExhausted: false,
+        resolved: false,
+      });
+      expect(e.route_to, `${category} should route to ${team}`).toBe(team);
+    }
+  });
+
+  it("routes a security report to security operations even with nothing blocked", () => {
+    const e = assessEscalation({
+      ticket: ticket({ description: "I got a phishing email and downloaded the attachment." }),
+      intake: { ...intake, category: "security" },
+      results: [],
+      budgetExhausted: false,
+      resolved: false,
+      wantsHuman: true,
+    });
+    expect(e.triggered).toBe(true);
+    expect(e.route_to).toBe("security-operations");
+  });
+
+  it("treats the agent asking for a human as a real trigger, not a fallback", () => {
+    const e = assessEscalation({
+      ticket: ticket({}),
+      intake,
+      results: [],
+      budgetExhausted: false,
+      resolved: false,
+      wantsHuman: true,
+    });
+    expect(e.triggered).toBe(true);
+    expect(e.triggers).toContain("low-confidence");
+    expect(e.handover.suggested_next_steps.length).toBeGreaterThan(0);
+  });
+
+  it("does not escalate a resolved run just because the agent stopped", () => {
+    const e = assessEscalation({
+      ticket: ticket({}),
+      intake,
+      results: [],
+      budgetExhausted: false,
+      resolved: true,
+      wantsHuman: true,
+    });
+    expect(e.triggered).toBe(false);
   });
 
   it("routes hardware faults to field services", () => {

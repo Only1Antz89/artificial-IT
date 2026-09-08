@@ -13,7 +13,12 @@ import {
   type DeviceState,
 } from "../execution-plane/device.js";
 import type { DeviceInfo } from "../contracts/ticket.js";
-import { browserScreen, printQueueScreen } from "./screen.js";
+import {
+  browserScreen,
+  printQueueScreen,
+  storageScreen,
+  vpnScreen,
+} from "./screen.js";
 
 /* ------------------------------------------------------------------ *
  * Windows laptop with a stale DNS cache
@@ -92,6 +97,27 @@ Successfully flushed the DNS Resolver Cache.`,
     effect: (state) => {
       state["dns_cache_stale"] = false;
     },
+  },
+  // Used by the phishing scenario, which runs against this same laptop: the
+  // attachment the user says they downloaded is really sitting there.
+  {
+    match: /^Get-ChildItem \$env:USERPROFILE\\Downloads$/i,
+    respond: () => ({
+      stdout: `    Directory: C:\\Users\\p.raman\\Downloads
+
+Mode          LastWriteTime    Length Name
+-a---   06/09/2026    08:52     44032 Mailbox-Quota-Notice.hta
+-a---   03/09/2026    17:20   1841204 expenses-q3.xlsx`,
+    }),
+  },
+  {
+    match: /^Get-MpComputerStatus$/i,
+    respond: () => ({
+      stdout: `AMServiceEnabled            : True
+RealTimeProtectionEnabled   : True
+AntivirusSignatureLastUpdated : 06/09/2026 06:10:44
+QuickScanEndTime            : 06/09/2026 04:02:11`,
+    }),
   },
 ];
 
@@ -238,5 +264,155 @@ export function makeMacDnsDevice(): SimulatedDeviceSession {
     state: { dns_cache_stale: true },
     fixtures: macDnsFixtures,
     screen: browserScreen,
+  });
+}
+
+
+/* ------------------------------------------------------------------ *
+ * MacBook with a full disk
+ * ------------------------------------------------------------------ */
+
+export const MAC_DESIGNER: DeviceInfo = {
+  device_id: "dev-mb-4412",
+  hostname: "LDN-MB-4412",
+  platform: "macos",
+  os_version: "macOS 15.3",
+  consent_granted: true,
+  managed: true,
+};
+
+const macFullDiskFixtures: CommandFixture[] = [
+  {
+    match: /^uname -a$/,
+    respond: () => ({ stdout: "Darwin LDN-MB-4412 24.3.0 arm64" }),
+  },
+  {
+    match: /^uptime$/,
+    respond: () => ({
+      stdout: "11:42  up 6 days, 21:04, 2 users, load averages: 2.11 1.98 1.76",
+    }),
+  },
+  {
+    match: /^df -h \/$/,
+    respond: () => ({
+      stdout: `Filesystem       Size   Used  Avail Capacity iused      ifree %iused  Mounted on
+/dev/disk3s1s1  494Gi  468Gi   21Gi    96%  512003 1163983797    0%   /`,
+    }),
+  },
+  {
+    match: /^vm_stat$/,
+    respond: () => ({
+      stdout: `Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                               31200.
+Pages active:                            742118.
+Pages inactive:                          688220.
+Pages wired down:                        241004.`,
+    }),
+  },
+  {
+    match: /^ps -Ao pid,pmem,pcpu,comm -m$/,
+    respond: () => ({
+      stdout: `  PID %MEM %CPU COMM
+  914 18.2  4.1 /Applications/Adobe Photoshop 2026/Adobe Photoshop 2026.app/Contents/MacOS/Adobe Photoshop
+  622  9.4  1.2 /Applications/Slack.app/Contents/MacOS/Slack`,
+    }),
+  },
+  {
+    match: /^dscacheutil -q host -a name example\.com$/,
+    respond: () => ({ stdout: "name: example.com\nip_address: 93.184.216.34" }),
+  },
+  {
+    match: /^du -sh \/Users$/,
+    respond: () => ({ stdout: "451G\t/Users" }),
+  },
+  {
+    match: /^ls -lt ~\/Downloads$/,
+    respond: () => ({
+      stdout: `total 18400
+-rw-r--r--@ 1 s.almeida  staff   4.1G  5 Sep 12:40 shoot-raws-final.zip
+-rw-r--r--@ 1 s.almeida  staff   812M  2 Sep 09:11 brand-assets-v7.sketch`,
+    }),
+  },
+];
+
+export function makeMacFullDiskDevice(): SimulatedDeviceSession {
+  return new SimulatedDeviceSession({
+    device: MAC_DESIGNER,
+    state: { disk_percent: 96 },
+    fixtures: macFullDiskFixtures,
+    screen: storageScreen,
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Windows laptop dropping its VPN
+ * ------------------------------------------------------------------ */
+
+export const WIN_FIELD: DeviceInfo = {
+  device_id: "dev-lt-7781",
+  hostname: "BHM-LT-7781",
+  platform: "windows",
+  os_version: "Windows 11 24H2",
+  consent_granted: true,
+  managed: true,
+};
+
+const winVpnFixtures: CommandFixture[] = [
+  {
+    match: /^systeminfo$/,
+    respond: () => ({
+      stdout: `Host Name:                 BHM-LT-7781
+OS Name:                   Microsoft Windows 11 Enterprise
+System Boot Time:          03/09/2026, 08:14:22
+Total Physical Memory:     16,142 MB`,
+    }),
+  },
+  {
+    match: /^ipconfig \/all$/,
+    respond: () => ({
+      stdout: `Windows IP Configuration
+
+Wireless LAN adapter Wi-Fi:
+   IPv4 Address. . . . . . . . . . . : 192.168.1.114(Preferred)
+   Default Gateway . . . . . . . . . : 192.168.1.1
+   DNS Servers . . . . . . . . . . . : 192.168.1.1`,
+    }),
+  },
+  {
+    match: /^netsh wlan show interfaces$/,
+    respond: () => ({
+      stdout: `    Name                   : Wi-Fi
+    State                  : connected
+    SSID                   : Travelodge_Guest
+    Signal                 : 28%
+    Receive rate (Mbps)    : 6.5`,
+    }),
+  },
+  {
+    match: /^wmic path Win32_Battery get EstimatedChargeRemaining$/,
+    respond: () => ({ stdout: "EstimatedChargeRemaining\n64" }),
+  },
+  {
+    match: /^tasklist$/,
+    respond: () => ({
+      stdout: `Image Name                     PID Mem Usage
+GlobalProtect.exe             4180  84,220 K
+Teams.exe                     6612 412,880 K`,
+    }),
+  },
+  {
+    match: /^nslookup example\.com$/,
+    respond: () => ({
+      stdout: "Server:  router.home\nAddress:  192.168.1.1\n\nName:    example.com\nAddress:  93.184.216.34",
+    }),
+  },
+];
+
+export function makeWindowsVpnDevice(): SimulatedDeviceSession {
+  return new SimulatedDeviceSession({
+    device: WIN_FIELD,
+    state: { wifi_signal: 28 },
+    fixtures: winVpnFixtures,
+    screen: vpnScreen,
   });
 }

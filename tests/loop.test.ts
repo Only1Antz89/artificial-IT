@@ -16,6 +16,7 @@ import { HeuristicBrain } from "../src/agent/heuristic-brain.js";
 import { AutoDenyGate, PolicyBoundGate } from "../src/control-plane/approvals.js";
 import { KnowledgeStore } from "../src/knowledge/index.js";
 import {
+  makeMacFullDiskDevice,
   makeWindowsDnsDevice,
   makeWindowsPrintDevice,
 } from "../src/demo/devices.js";
@@ -208,5 +209,65 @@ describe("the step budget is enforced", () => {
     expect(run.results.length).toBeLessThanOrEqual(2);
     expect(run.status).toBe("escalated");
     expect(run.escalation?.triggers).toContain("budget-exhausted");
+  });
+});
+
+describe("what a hard block freezes, and what it does not", () => {
+  it("keeps investigating read-only after refusing the user's request", async () => {
+    const run = await newRun({
+      ticket: ticketFor(4826),
+      session: makeMacFullDiskDevice(),
+    });
+
+    const blocked = run.results.filter((r) => r.outcome === "blocked");
+    expect(blocked.length).toBeGreaterThan(0);
+
+    // The refusal came first, and read-only work carried on after it.
+    const firstBlock = run.results.indexOf(blocked[0]!);
+    const laterCommands = run.results
+      .slice(firstBlock + 1)
+      .filter((r) => r.outcome === "success" && r.command);
+    expect(laterCommands.length).toBeGreaterThan(0);
+    expect(laterCommands.every((r) => r.step.mutating === false)).toBe(true);
+  });
+
+  it("never runs a mutating step once a guardrail has fired", async () => {
+    const run = await newRun({
+      ticket: ticketFor(4826),
+      session: makeMacFullDiskDevice(),
+    });
+    for (const r of run.results) {
+      if (r.step.mutating) expect(r.command).toBeUndefined();
+    }
+  });
+
+  it("never reports a frozen run as resolved", async () => {
+    const run = await newRun({
+      ticket: ticketFor(4826),
+      session: makeMacFullDiskDevice(),
+    });
+    expect(run.status).toBe("escalated");
+    expect(run.escalation!.triggers).toContain("policy-block");
+  });
+
+  it("does not ask the user a question it cannot act on after a refusal", async () => {
+    // A ticket with no device and nothing but refused requests in it. Asking
+    // "which machine is this?" would leave the user waiting for nothing.
+    const run = await newRun({
+      ticket: ticketFor(4824),
+      session: undefined,
+      askUser: async () => "a laptop",
+    });
+    expect(run.results.some((r) => r.step.kind === "ask_user")).toBe(false);
+    expect(run.status).toBe("escalated");
+  });
+
+  it("still refuses the rest of the same request in the batch it was refused in", async () => {
+    const run = await newRun({ ticket: ticketFor(4824), session: undefined });
+    const notAttempted = run.results.filter(
+      (r) => r.outcome === "blocked" || r.outcome === "skipped",
+    );
+    expect(notAttempted.length).toBeGreaterThanOrEqual(2);
+    expect(notAttempted.every((r) => r.command === undefined)).toBe(true);
   });
 });

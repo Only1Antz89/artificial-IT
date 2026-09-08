@@ -63,14 +63,30 @@ export async function executeStep(
         return await runReadFile(step, verdict, ctx, started_at);
       case "ask_user":
         return runAskUser(step, verdict, ctx, started_at);
+      case "ui_action":
+        // Driving a desktop needs a GUI automation backend, and there is not
+        // one wired up. Failing honestly beats reporting "skipped", which reads
+        // like a decision rather than a missing capability - and a run that
+        // appears to have clicked something it never clicked is the worst of
+        // both.
+        return {
+          ...base,
+          outcome: "failed",
+          finished_at: nowIso(),
+          observation:
+            "AIT has no UI automation backend, so it cannot drive the desktop directly.",
+          error: "no UI automation backend is configured",
+        };
+
       default:
-        // `ui_action`, `ticket_comment` and `knowledge_lookup` are handled by
-        // the agent loop, which owns the surfaces they touch.
+        // `ticket_comment` and `knowledge_lookup` are the agent loop's own
+        // business - it owns the ticket and the knowledge base - so a step of
+        // that kind reaching the executor means something upstream is confused.
         return {
           ...base,
           outcome: "skipped",
           finished_at: nowIso(),
-          observation: `Step kind "${step.kind}" is not executed on the device.`,
+          observation: `"${step.kind}" is handled by the agent loop, not the device.`,
         };
     }
   } catch (err) {

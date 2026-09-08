@@ -267,3 +267,60 @@ describe("normalisation helpers", () => {
     expect(verdict.decision).toBe("block");
   });
 });
+
+describe("someone else's mail", () => {
+  const cases: [string, string, string | undefined][] = [
+    [
+      "granting delegated access outright",
+      "Grant the requester full access to the colleague's mailbox",
+      "Add-MailboxPermission -Identity h.nakamura -User m.lyle -AccessRights FullAccess",
+    ],
+    [
+      // The workaround a user offers the moment the first ask is refused.
+      "forwarding it instead",
+      "Forward the colleague's incoming mail to the requester",
+      "Set-Mailbox h.nakamura -ForwardingSMTPAddress marcus.lyle@example.com",
+    ],
+    [
+      "exporting a mailbox",
+      "Export the mailbox for review",
+      "New-MailboxExportRequest -Mailbox h.nakamura -FilePath \\\\share\\pst\\hana.pst",
+    ],
+    [
+      "searching one",
+      "Search the mailbox for the contract thread",
+      "Search-Mailbox -Identity h.nakamura -SearchQuery contract",
+    ],
+    ["reading it, phrased as prose", "Read another user's inbox for them", undefined],
+  ];
+
+  for (const [name, intent, command] of cases) {
+    it(`blocks ${name}`, () => {
+      const v = verdictFor(intent, command);
+      expect(v.decision).toBe("block");
+      expect(v.categories).toContain("compliance");
+      expect(v.escalate).toBe(true);
+    });
+  }
+
+  it("does not block a user asking about their own mailbox", () => {
+    const v = verdictFor(
+      "Check the size of the requester's own mailbox",
+      "Get-MailboxStatistics -Identity m.lyle",
+    );
+    expect(v.decision).not.toBe("block");
+  });
+});
+
+describe("reading endpoint protection state", () => {
+  it("allows the read-only Defender status query", () => {
+    const v = verdictFor("Confirm endpoint protection is running and current", "Get-MpComputerStatus");
+    expect(v.decision).toBe("allow");
+  });
+
+  it("still blocks the mutating form of the same tool", () => {
+    const v = verdictFor("Turn off real-time protection", "Set-MpPreference -DisableRealtimeMonitoring $true");
+    expect(v.decision).toBe("block");
+    expect(v.categories).toContain("security-controls");
+  });
+});

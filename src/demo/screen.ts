@@ -100,3 +100,94 @@ export function printQueueScreen(state: DeviceState): ScreenCapture {
       : `Print queue showing ${jobs} job(s) printing normally.`,
   };
 }
+
+/** The macOS storage pane on a volume that has almost nothing left. */
+export function storageScreen(state: DeviceState): ScreenCapture {
+  const used = Number(state["disk_percent"] ?? 0);
+  const free = Math.max(0, 100 - used);
+  const barW = W - 200;
+  const usedW = Math.round((barW * used) / 100);
+
+  // The four largest categories, sized so they add up to the used portion.
+  const segments: [string, number, string][] = [
+    ["Documents", 0.42, "#175cd3"],
+    ["Photos", 0.24, "#2e90fa"],
+    ["Applications", 0.19, "#84caff"],
+    ["System Data", 0.15, "#b2ddff"],
+  ];
+  let x = 100;
+  const bars = segments
+    .map(([, share, fill]) => {
+      const w = Math.round(usedW * share);
+      const rect = `<rect x="${x}" y="150" width="${w}" height="34" fill="${fill}"/>`;
+      x += w;
+      return rect;
+    })
+    .join("\n  ");
+
+  const legend = segments
+    .map(([label, share, fill], i) => {
+      const y = 232 + i * 30;
+      return `<rect x="100" y="${y - 11}" width="12" height="12" rx="3" fill="${fill}"/>
+  <text x="122" y="${y}" font-family="system-ui, sans-serif" font-size="13" fill="#101828">${esc(label)}</text>
+  <text x="${W - 100}" y="${y}" font-family="system-ui, sans-serif" font-size="13" fill="#475467" text-anchor="end">${Math.round(468 * share)} GB</text>`;
+    })
+    .join("\n  ");
+
+  const body = `<rect x="40" y="70" width="${W - 80}" height="${H - 120}" fill="#ffffff" stroke="#d0d5dd" rx="8"/>
+  <text x="100" y="120" font-family="system-ui, sans-serif" font-size="18" font-weight="700" fill="#101828">Macintosh HD</text>
+  <rect x="100" y="150" width="${barW}" height="34" rx="4" fill="#eaecf0"/>
+  ${bars}
+  <text x="100" y="208" font-family="system-ui, sans-serif" font-size="13.5" fill="${free < 10 ? "#b42318" : "#475467"}">${free < 10 ? `Your disk is almost full — only ${free}% (21 GB) available of 494 GB` : `${free}% available of 494 GB`}</text>
+  ${legend}`;
+
+  return {
+    source: "rendered",
+    svg: chrome("Storage — Macintosh HD", body),
+    width: W,
+    height: H,
+    description: `Storage pane showing the volume ${used}% full with ${free}% free.`,
+  };
+}
+
+/** A VPN client that keeps losing its tunnel over a weak wireless link. */
+export function vpnScreen(state: DeviceState): ScreenCapture {
+  const signal = Number(state["wifi_signal"] ?? 100);
+  const weak = signal < 40;
+  const bars = Array.from({ length: 5 }, (_, i) => {
+    const lit = signal >= (i + 1) * 20;
+    const h = 8 + i * 7;
+    return `<rect x="${104 + i * 14}" y="${168 - h}" width="9" height="${h}" rx="2" fill="${lit ? (weak ? "#f79009" : "#12b76a") : "#eaecf0"}"/>`;
+  }).join("\n  ");
+
+  const log = [
+    "09:41:02  Tunnel established (gw-lon-01)",
+    "09:43:18  Keepalive missed (3 of 3)",
+    "09:43:19  Tunnel down — reconnecting",
+    "09:43:44  Tunnel established (gw-lon-01)",
+    "09:45:57  Tunnel down — reconnecting",
+  ]
+    .map(
+      (line, i) =>
+        `<text x="100" y="${300 + i * 26}" font-family="ui-monospace, monospace" font-size="12.5" fill="${line.includes("down") ? "#b42318" : "#475467"}">${esc(line)}</text>`,
+    )
+    .join("\n  ");
+
+  const body = `<rect x="40" y="70" width="${W - 80}" height="${H - 120}" fill="#ffffff" stroke="#d0d5dd" rx="8"/>
+  <text x="100" y="118" font-family="system-ui, sans-serif" font-size="18" font-weight="700" fill="#101828">GlobalProtect</text>
+  <text x="100" y="144" font-family="system-ui, sans-serif" font-size="13.5" fill="${weak ? "#b42318" : "#027a48"}">${weak ? "Disconnected — reconnecting" : "Connected"}</text>
+  ${bars}
+  <text x="184" y="168" font-family="system-ui, sans-serif" font-size="13" fill="#475467">Travelodge_Guest — signal ${signal}%</text>
+  <text x="100" y="268" font-family="system-ui, sans-serif" font-size="11.5" font-weight="700" fill="#475467">CONNECTION LOG</text>
+  ${log}`;
+
+  return {
+    source: "rendered",
+    svg: chrome("GlobalProtect — Connection", body),
+    width: W,
+    height: H,
+    description: weak
+      ? `VPN client reconnecting in a loop on a ${signal}% wireless signal.`
+      : `VPN client connected on a ${signal}% wireless signal.`,
+  };
+}

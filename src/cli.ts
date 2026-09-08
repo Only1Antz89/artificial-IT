@@ -26,8 +26,7 @@ import { runTicket } from "./agent/loop.js";
 import { selectBrainChecked } from "./agent/select-brain.js";
 import { PolicyBoundGate } from "./control-plane/approvals.js";
 import { KnowledgeStore } from "./knowledge/index.js";
-import { localSession } from "./demo/local.js";
-import { makeMacDnsDevice, makeWindowsDnsDevice, makeWindowsPrintDevice } from "./demo/devices.js";
+import { sessionForTarget } from "./demo/sessions.js";
 import { selectBrain } from "./agent/select-brain.js";
 import { runDoctor, type CheckState } from "./doctor.js";
 import * as nodeFs from "node:fs";
@@ -310,16 +309,7 @@ async function cmdTicket(args: string[]): Promise<void> {
   const ticket = adHocTicket({ description, target });
   const selection = await selectBrainChecked(provider);
 
-  const session =
-    target === "no-device"
-      ? undefined
-      : target === "simulated-windows-laptop"
-        ? makeWindowsDnsDevice()
-        : target === "simulated-windows-desktop"
-          ? makeWindowsPrintDevice()
-          : target === "simulated-mac-laptop"
-            ? makeMacDnsDevice()
-            : localSession();
+  const session = sessionForTarget(target);
 
   console.log(`\n${c.bold("AIT")} ${c.dim(`— ${selection.provider} (${selection.model}) · ${target}`)}`);
   console.log(`${c.dim("ticket:")} ${ticket.subject}\n`);

@@ -170,10 +170,10 @@ Models are overridable: `ANTHROPIC_MODEL`, `OPENAI_MODEL`.
 
 ## The demo
 
-Five scenarios, each exercising a different part of the system:
+Nine scenarios, each exercising a different part of the system:
 
 ```bash
-npm run demo                    # all five
+npm run demo                    # all nine
 npm run demo -- dns-outage      # just one
 npm run cli -- scenarios        # list them, including the local ones
 npm run cli -- providers        # which providers are configured and verified
@@ -194,6 +194,21 @@ npm run queue                   # every open ticket, with a shift summary
 | `password-reset` | The credentials guardrail: hard stop, no device work, escalation with a handover pack |
 | `new-starter` | Identity **and** finance guardrails; every refused request reported, not just the first |
 | `repeat-dns` | Learning: the entry written by `dns-outage` is recalled and shapes the diagnosis on a different platform |
+| `full-disk` | The destructive guardrail refuses the mass deletion asked for, then the run **carries on read-only** and hands back the real numbers |
+| `vpn-drop` | The security-controls guardrail; a root cause read out of a real number (28% signal) rather than matched as a string; routed to security operations |
+| `phishing` | A security report: read-only endpoint checks find the downloaded attachment, nothing is remediated on the device |
+| `mailbox-access` | The compliance guardrail blocks the direct grant **and** the forwarding workaround the user offers instead |
+
+A refusal freezes changes, not the investigation. After a hard block nothing
+mutating runs for the rest of the ticket — but the read-only diagnosis carries
+on, so the technician who picks it up gets "I would not delete your files, and
+here is what is actually filling the disk" rather than a dead end. A run that
+was frozen is never reported as resolved, however clean the checks came back.
+
+Escalations route by the risk category that fired, not to a single queue:
+security controls and data exfiltration go to security operations, compliance to
+information governance, finance to finance systems, credentials and identity to
+identity and access.
 
 The simulated devices have real mutable state. The agent has to read the command
 output, notice the fault, apply the right fix and re-check — if it applies the

@@ -28,6 +28,7 @@ import type {
   ProposeInput,
   ProposeOutput,
 } from "./brain.js";
+import { extractSymptoms } from "./symptoms.js";
 import {
   findPlaybook,
   findRequestedActions,
@@ -36,6 +37,7 @@ import {
 } from "./playbooks.js";
 import {
   checksForCategory,
+  fixFor,
   type HostPlatform,
   type LocalCheck,
   type TicketCategory,
@@ -57,11 +59,10 @@ export class HeuristicBrain implements Brain {
     const text = `${ticket.subject}\n${ticket.description}`;
     const playbook = findPlaybook(text);
 
-    const symptoms = ticket.description
-      .split(/[.\n]/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 12)
-      .slice(0, 4);
+    // Not every sentence in a ticket is a symptom. `extractSymptoms` keeps the
+    // ones that read like fault reports and trims them, because these strings
+    // become the text the knowledge base matches future tickets against.
+    const symptoms = extractSymptoms(ticket.description, ticket.subject);
 
     const missing: string[] = [];
     if (!ticket.device) missing.push("Which device is affected.");
@@ -75,7 +76,7 @@ export class HeuristicBrain implements Brain {
     return {
       summary: ticket.subject,
       category: playbook?.category ?? inferCategory(text),
-      reported_symptoms: symptoms.length ? symptoms : [ticket.subject],
+      reported_symptoms: symptoms,
       missing_information: missing,
       out_of_scope: OUT_OF_SCOPE.test(text),
       user_sentiment: BLOCKED.test(text)
@@ -184,7 +185,17 @@ export class HeuristicBrain implements Brain {
     const alreadyAsked = history.some((h) => h.step.kind === "ask_user");
     const missing = input.intake.missing_information[0];
     const wouldChangeTheApproach = !playbook && !isLocalTicket(ticket);
-    if (input.canAskUser && !alreadyAsked && missing && wouldChangeTheApproach) {
+    // Once something has been refused on policy grounds, no answer the user
+    // gives changes the outcome - the refusal stands either way. Asking anyway
+    // leaves them waiting on a question that cannot help them.
+    const alreadyRefused = history.some((h) => h.outcome === "blocked");
+    if (
+      input.canAskUser &&
+      !alreadyAsked &&
+      !alreadyRefused &&
+      missing &&
+      wouldChangeTheApproach
+    ) {
       return {
         steps: [
           {
@@ -253,14 +264,33 @@ export class HeuristicBrain implements Brain {
     }
 
     // Phase 2 - only apply a fix if a diagnostic actually showed the fault.
-    const faultFound = diagnostics.some((d) => {
-      if (!d.faultSignal) return false;
+    const faultyChecks = diagnostics.filter((d) => {
+      if (!d.faultSignal && !d.faultWhen) return false;
       const result = history.find(
         (h) => String(h.step.payload["command"]) === d.command,
       );
-      const output = `${result?.command?.stdout ?? ""}${result?.command?.stderr ?? ""}`;
-      return output.toLowerCase().includes(d.faultSignal.toLowerCase());
+      if (!result) return false;
+      const output = `${result.command?.stdout ?? ""}${result.command?.stderr ?? ""}`;
+      if (d.faultWhen?.(output)) return true;
+      return d.faultSignal
+        ? output.toLowerCase().includes(d.faultSignal.toLowerCase())
+        : false;
     });
+    const faultFound = faultyChecks.length > 0;
+
+    // The fault is real and identified, but this playbook has no command that
+    // fixes it - a full disk, a weak radio, a downloaded attachment. Saying so
+    // with the root cause attached is a better answer than either inventing a
+    // fix or reporting "nothing found".
+    if (faultFound && fixes.length === 0) {
+      return {
+        steps: [],
+        resolved: false,
+        wants_human: true,
+        root_cause: playbook.rootCause,
+        reasoning: `${faultyChecks[0]!.intent} showed the fault, but no safe automated fix exists for it - it needs a decision, not a command.`,
+      };
+    }
 
     if (!faultFound) {
       return {
@@ -283,7 +313,7 @@ export class HeuristicBrain implements Brain {
     }
 
     // Phase 3 - verify. A fix is not a resolution until something confirms it.
-    const verifier = diagnostics.find((d) => d.faultSignal);
+    const verifier = diagnostics.find((d) => d.faultSignal ?? d.faultWhen);
     const alreadyVerified = history.filter(
       (h) => String(h.step.payload["command"]) === verifier?.command,
     ).length;
@@ -310,11 +340,12 @@ export class HeuristicBrain implements Brain {
       (h) => String(h.step.payload["command"]) === verifier?.command,
     );
     const last = verifyRuns[verifyRuns.length - 1];
-    const stillFaulty =
-      verifier?.faultSignal !== undefined &&
-      `${last?.command?.stdout ?? ""}${last?.command?.stderr ?? ""}`
-        .toLowerCase()
-        .includes(verifier.faultSignal.toLowerCase());
+    const lastOutput = `${last?.command?.stdout ?? ""}${last?.command?.stderr ?? ""}`;
+    const stillFaulty = verifier
+      ? (verifier.faultWhen?.(lastOutput) ?? false) ||
+        (verifier.faultSignal !== undefined &&
+          lastOutput.toLowerCase().includes(verifier.faultSignal.toLowerCase()))
+      : false;
 
     if (stillFaulty) {
       return {
@@ -381,16 +412,67 @@ export class HeuristicBrain implements Brain {
     }
 
     // Every check has run. Read the real output and say what is actually true.
-    const findings = readFindings(checks, platform, input.history);
+    const faults = readFaults(checks, platform, input.history);
 
-    if (findings.length === 0) {
+    if (faults.length === 0) {
+      // Nothing wrong on the first pass, or the fix worked and the re-check is
+      // now clean. Either way there is nothing left to do.
+      const applied = input.history.filter((h) => h.step.mutating && h.outcome === "success");
       return {
         steps: [],
         resolved: true,
-        root_cause:
-          "No fault found. Every check ran clean against this machine's real state.",
-        reasoning:
-          "All checks completed within threshold. Nothing is wrong, so nothing was changed.",
+        root_cause: applied.length
+          ? `${applied.map((a) => a.step.intent).join("; ")} - confirmed by re-running the check that had been failing.`
+          : "No fault found. Every check ran clean against this machine's real state.",
+        reasoning: applied.length
+          ? "The fix was applied and the failing check now passes."
+          : "All checks completed within threshold. Nothing is wrong, so nothing was changed.",
+      };
+    }
+
+    // A fault with a safe fix this host can run: apply it, then re-check.
+    const capabilities = input.capabilities!.availableCommands;
+    for (const { check, finding } of faults) {
+      const fix = fixFor(check, platform, capabilities);
+      if (!fix) continue;
+      if (attempted.has(fix.intent)) continue;
+
+      return {
+        steps: [
+          {
+            id: newId("step"),
+            kind: "command" as const,
+            intent: fix.intent,
+            payload: { command: fix.command, fixes: check.id },
+            mutating: true,
+            rollback: fix.rollback,
+            ...(fix.rollbackCommand ? { rollback_command: fix.rollbackCommand } : {}),
+          },
+        ],
+        resolved: false,
+        root_cause: finding,
+        reasoning: `The check found a fault with a safe, reversible fix: ${finding}`,
+      };
+    }
+
+    // A fix ran, so re-run the check that had been failing rather than taking
+    // the fix's word for it.
+    const fixedChecks = faults.filter((f) => fixFor(f.check, platform, capabilities));
+    const verified = input.history.filter((h) => h.step.payload["verifies"]).length;
+    if (fixedChecks.length > 0 && verified < fixedChecks.length) {
+      const check = fixedChecks[verified]!.check;
+      return {
+        steps: [
+          {
+            id: newId("step"),
+            kind: "command" as const,
+            intent: `Re-run the check to confirm the fix held: ${check.intent.toLowerCase()}`,
+            payload: { command: check.command[platform]!, local_check: check.id, verifies: check.id },
+            mutating: false,
+          },
+        ],
+        resolved: false,
+        reasoning: "Fix applied; verifying before calling this resolved.",
       };
     }
 
@@ -398,9 +480,10 @@ export class HeuristicBrain implements Brain {
       steps: [],
       resolved: false,
       wants_human: true,
-      root_cause: findings.join(" "),
-      reasoning:
-        "The checks found real problems, but resolving them means deleting a user's data or ending their work, which needs a person.",
+      root_cause: faults.map((f) => f.finding).join(" "),
+      reasoning: fixedChecks.length
+        ? "The fix was applied but the fault is still present."
+        : "The checks found real problems, but resolving them means deleting a user's data, replacing hardware, or ending their work - all decisions a person makes.",
     };
   }
 
@@ -529,11 +612,20 @@ function userReply(ctx: {
   // Something was refused on policy grounds. Say so, and say why, without
   // making it sound like the user did something wrong.
   if (refusedCategories.length > 0) {
-    return `Hi ${name}, thanks for getting in touch. What you've asked for needs to go through one of our colleagues rather than being done automatically — ${explainCategories(refusedCategories)}. I haven't made any changes, and I've passed the request to the right team with everything they need, so you shouldn't have to explain it again.`;
+    // A refusal is not the whole story when the checks that followed it found
+    // something. Telling the user only "I can't do that" while sitting on the
+    // answer to their actual problem is the version of this that annoys people.
+    const finding = ranChecks && cause && !/^not established/i.test(cause)
+      ? ` I did look at the underlying problem while I was there: ${lowerFirst(cause)}`
+      : "";
+    return `Hi ${name}, thanks for getting in touch. What you've asked for needs to go through one of our colleagues rather than being done automatically — ${explainCategories(refusedCategories)}. I haven't made any changes, and I've passed the request to the right team with everything they need, so you shouldn't have to explain it again.${finding}`;
   }
 
   if (escalated && ranChecks) {
-    return `Hi ${name}, thanks for the details. I've run some initial checks on your machine and gathered what I found, but this one needs a colleague to take it further. I've passed everything over so they won't need to ask you to repeat yourself.`;
+    const finding = cause && !/^not established/i.test(cause)
+      ? ` What I found: ${lowerFirst(cause)}`
+      : "";
+    return `Hi ${name}, thanks for the details. I've run some initial checks on your machine and gathered what I found, but this one needs a colleague to take it further.${finding} I've passed everything over so they won't need to ask you to repeat yourself.`;
   }
 
   if (escalated) {
@@ -659,22 +751,25 @@ function isLocalTicket(ticket: { tags: string[] }): boolean {
  * machine's actual numbers, so a healthy machine produces an empty list and the
  * run resolves as "nothing wrong" instead of inventing something to fix.
  */
-function readFindings(
+function readFaults(
   checks: LocalCheck[],
   platform: HostPlatform,
   history: StepResult[],
-): string[] {
-  const findings: string[] = [];
+): { check: LocalCheck; finding: string }[] {
+  const faults: { check: LocalCheck; finding: string }[] = [];
   for (const check of checks) {
     const command = check.command[platform];
-    const result = history.find(
+    // The *latest* run of the check, so a re-check after a fix is what counts
+    // rather than the failing run that prompted it.
+    const runs = history.filter(
       (h) => String(h.step.payload["command"]) === command && h.command,
     );
+    const result = runs[runs.length - 1];
     if (!result?.command) continue;
     const finding = check.interpret(result.command);
-    if (finding) findings.push(finding);
+    if (finding) faults.push({ check, finding });
   }
-  return findings;
+  return faults;
 }
 
 /** Playbooks whose fault shows up on screen and is worth photographing. */
@@ -754,7 +849,18 @@ function plainCause(playbook: Playbook | undefined, fallback: string): string {
       return "Your machine was holding on to an out-of-date address for the site, which is why it wouldn't load even though your connection was fine.";
     case "pb.print-spooler":
       return "The printing service on your machine had stopped, so your jobs were queueing up instead of being sent to the printer.";
+    case "pb.vpn-drop":
+      return "The wi-fi you're on is too weak to keep the VPN connection up, so the client keeps dropping and reconnecting - the tunnel itself is fine.";
+    case "pb.disk-space":
+      return "Your startup disk is almost completely full, which is why apps have stopped being able to save.";
+    case "pb.phishing-report":
+      return "The message looks like a phishing attempt, and the attachment from it did download to your machine.";
     default:
       return fallback;
   }
+}
+
+/** Lowercase the first letter so a sentence can be spliced mid-sentence. */
+function lowerFirst(text: string): string {
+  return text.charAt(0).toLowerCase() + text.slice(1);
 }

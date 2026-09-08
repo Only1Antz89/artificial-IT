@@ -172,6 +172,17 @@ export async function runTicket(options: RunOptions): Promise<Run> {
   let resolved = false;
   let wantsHuman = false;
   let rootCause = diagnosis.root_cause;
+  /**
+   * Set by a hard block, and never cleared.
+   *
+   * A refusal freezes *changes*, not the whole investigation. Refusing to
+   * delete a user's files is not a reason to stop finding out what is filling
+   * their disk - the technician picking this up still wants the numbers. So
+   * after a block the run carries on read-only: every remaining mutating step
+   * is recorded as refused without being attempted, and the escalation goes out
+   * either way.
+   */
+  let changesFrozen = false;
 
   // An out-of-scope request is not investigated at all. Running diagnostics on
   // a machine to answer an HR question would be an intrusion, not a service.
@@ -221,8 +232,10 @@ export async function runTicket(options: RunOptions): Promise<Run> {
         reasoning: proposal.reasoning,
         wants_human: proposal.wants_human ?? false,
       });
-      resolved = proposal.resolved;
-      wantsHuman = proposal.wants_human ?? !proposal.resolved;
+      // A run that refused the user's actual request is never "resolved",
+      // however clean the read-only checks that followed came back.
+      resolved = proposal.resolved && !changesFrozen;
+      wantsHuman = proposal.wants_human ?? !resolved;
       break;
     }
 
@@ -235,9 +248,12 @@ export async function runTicket(options: RunOptions): Promise<Run> {
     );
     emit({ type: "proposed", steps: proposal.steps, reasoning: proposal.reasoning });
 
-    // Set once a hard block fires. The rest of the batch is still evaluated and
-    // recorded - a technician picking this up wants the full list of what was
-    // refused, not just the first thing - but nothing further is executed.
+    // Set once a hard block fires, for the remainder of *this* batch. The rest
+    // of the batch is still evaluated and recorded - a technician picking this
+    // up wants the full list of what was refused, not just the first thing -
+    // but nothing further in it is executed, because the steps that follow a
+    // refused one are usually the rest of the same request. Later batches
+    // continue read-only under `changesFrozen`.
     let halted = false;
 
     for (const step of proposal.steps) {
@@ -247,6 +263,28 @@ export async function runTicket(options: RunOptions): Promise<Run> {
       const verdict = evaluate(step, {
         ...(ticket.device ? { device: ticket.device } : {}),
       });
+
+      if (changesFrozen && !halted && step.mutating) {
+        audit.record(
+          "policy.evaluated",
+          "policy",
+          `refused (changes frozen): ${step.intent}`,
+          { rule_id: verdict.rule_id, categories: verdict.categories },
+        );
+        const frozen: StepResult = {
+          step,
+          verdict,
+          outcome: "skipped",
+          started_at: nowIso(),
+          finished_at: nowIso(),
+          observation:
+            "Not attempted: a guardrail already stopped this ticket, so nothing further on this device is changed.",
+          artifacts: [],
+        };
+        results.push(frozen);
+        emit({ type: "step", result: frozen });
+        continue;
+      }
 
       if (halted) {
         audit.record(
@@ -354,8 +392,11 @@ export async function runTicket(options: RunOptions): Promise<Run> {
       // to prevent - so nothing further executes, though the remaining
       // proposals are still evaluated above for the handover.
       if (result.outcome === "blocked" && cleared.escalate) {
-        wantsHuman = true;
+        // Not `wantsHuman = true`: that would end the run here. The blocked
+        // result guarantees a `policy-block` escalation at the end regardless,
+        // so the loop is free to keep looking read-only in the meantime.
         halted = true;
+        changesFrozen = true;
         continue;
       }
       // A refused approval ends it too. "No" means no to the change, and the
@@ -381,6 +422,7 @@ export async function runTicket(options: RunOptions): Promise<Run> {
   // ---- 5. Decide on escalation --------------------------------------------
   const escalation = assessEscalation({
     ticket,
+    wantsHuman,
     intake,
     diagnosis: { ...diagnosis, ...(rootCause ? { root_cause: rootCause } : {}) },
     results,
@@ -388,6 +430,9 @@ export async function runTicket(options: RunOptions): Promise<Run> {
     resolved,
   });
   // The brain can ask for a human; it can never refuse to hand over.
+  // `assessEscalation` now sees `wantsHuman` and triggers on it, so this is a
+  // belt-and-braces check rather than the mechanism - if it ever fires, the
+  // ticket still gets handed over.
   if (wantsHuman && !escalation.triggered) {
     escalation.triggered = true;
     escalation.triggers = ["low-confidence"];
@@ -453,6 +498,23 @@ export async function runTicket(options: RunOptions): Promise<Run> {
   };
 
   // ---- 7. Learn ------------------------------------------------------------
+  // An entry that was recalled and then led to a resolution has earned the
+  // small ranking credit `times_applied` gives it. Without this the counter
+  // stayed at zero forever and the boost never applied to anything.
+  if (resolved) {
+    for (const entryId of knowledge_used) {
+      knowledge.markApplied(entryId);
+    }
+    if (knowledge_used.length > 0) {
+      audit.record(
+        "knowledge.retrieved",
+        "system",
+        `Credited ${knowledge_used.length} prior ticket(s) that led to this resolution.`,
+        { entries: knowledge_used },
+      );
+    }
+  }
+
   if (learn) {
     const learned = learnFromRun(knowledge, run);
     if (learned.entry) {

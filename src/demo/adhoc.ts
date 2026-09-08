@@ -15,15 +15,19 @@ import { hostname } from "node:os";
 import { newId, nowIso, type Severity, type Ticket } from "../contracts/index.js";
 import { LOCAL_TICKET_TAG } from "../agent/heuristic-brain.js";
 import { localDevice, hostPlatform } from "./local.js";
-import { WIN_LAPTOP, WIN_DESKTOP, MAC_LAPTOP } from "./devices.js";
+import { WIN_LAPTOP, WIN_DESKTOP, WIN_FIELD, MAC_LAPTOP, MAC_DESIGNER } from "./devices.js";
+import { meshConfigFromEnv } from "../execution-plane/remote.js";
 import type { DeviceInfo } from "../contracts/ticket.js";
 
 /** Which machine an ad-hoc ticket is about. */
 export type AdHocTarget =
   | "this-machine"
+  | "remote-device"
   | "simulated-windows-laptop"
   | "simulated-windows-desktop"
   | "simulated-mac-laptop"
+  | "simulated-mac-designer"
+  | "simulated-windows-field-laptop"
   | "no-device";
 
 export interface AdHocRequest {
@@ -53,6 +57,11 @@ export const AD_HOC_TARGETS: { key: AdHocTarget; label: string; note: string }[]
     note: "Real commands against the host you are running on.",
   },
   {
+    key: "remote-device",
+    label: "Remote device (MeshCentral)",
+    note: "A managed endpoint reached over a remote-support session.",
+  },
+  {
     key: "simulated-windows-laptop",
     label: "Simulated Windows laptop",
     note: "LON-LT-2211, with a stale DNS cache.",
@@ -68,6 +77,16 @@ export const AD_HOC_TARGETS: { key: AdHocTarget; label: string; note: string }[]
     note: "LON-MB-1907, with a stale DNS cache.",
   },
   {
+    key: "simulated-mac-designer",
+    label: "Simulated MacBook (full disk)",
+    note: "LDN-MB-4412, 96% full with Photoshop unable to save.",
+  },
+  {
+    key: "simulated-windows-field-laptop",
+    label: "Simulated Windows laptop (weak wi-fi)",
+    note: "BHM-LT-7781, on a 28% guest wireless signal with the VPN dropping.",
+  },
+  {
     key: "no-device",
     label: "No device attached",
     note: "A request with nothing to run against - access requests, questions.",
@@ -78,12 +97,18 @@ function deviceFor(target: AdHocTarget): DeviceInfo | undefined {
   switch (target) {
     case "this-machine":
       return localDevice();
+    case "remote-device":
+      return remoteDevice();
     case "simulated-windows-laptop":
       return WIN_LAPTOP;
     case "simulated-windows-desktop":
       return WIN_DESKTOP;
     case "simulated-mac-laptop":
       return MAC_LAPTOP;
+    case "simulated-mac-designer":
+      return MAC_DESIGNER;
+    case "simulated-windows-field-laptop":
+      return WIN_FIELD;
     case "no-device":
       return undefined;
   }
@@ -109,6 +134,42 @@ export function deriveSubject(description: string): string {
 /** True when an ad-hoc ticket can be pointed at the real host. */
 export function localTargetAvailable(): boolean {
   return hostPlatform() !== "unknown";
+}
+
+/**
+ * The remote endpoint, when one is configured.
+ *
+ * `MESHCENTRAL_DEVICE_ID` names which managed machine to work on; without it
+ * there is a server but no device, which is not a target you can aim a ticket
+ * at. Platform comes from `MESHCENTRAL_DEVICE_PLATFORM` because MeshCentral
+ * knows it and we have not asked yet - guessing it would pick the wrong
+ * diagnostics.
+ */
+export function remoteDevice(): DeviceInfo | undefined {
+  const config = meshConfigFromEnv();
+  const deviceId = process.env["MESHCENTRAL_DEVICE_ID"];
+  if (!config || !deviceId) return undefined;
+
+  const declared = (process.env["MESHCENTRAL_DEVICE_PLATFORM"] ?? "").toLowerCase();
+  const platform: DeviceInfo["platform"] =
+    declared === "windows" || declared === "macos" || declared === "linux"
+      ? declared
+      : "unknown";
+
+  return {
+    device_id: deviceId,
+    hostname: process.env["MESHCENTRAL_DEVICE_NAME"] ?? deviceId,
+    platform,
+    // Consent for a remote-support session is granted in MeshCentral itself,
+    // by the user accepting the connection prompt.
+    consent_granted: true,
+    managed: true,
+  };
+}
+
+/** True when a ticket can be aimed at a real remote endpoint. */
+export function remoteTargetAvailable(): boolean {
+  return remoteDevice() !== undefined;
 }
 
 export function adHocTicket(request: AdHocRequest): Ticket {
@@ -142,7 +203,12 @@ export function adHocTicket(request: AdHocRequest): Ticket {
     priority: request.priority ?? "normal",
     // The local tag is what routes a real-host ticket down the local-checks
     // path rather than the simulated playbooks.
-    tags: target === "this-machine" ? [LOCAL_TICKET_TAG, "ad-hoc"] : ["ad-hoc"],
+    // Both a real local host and a real remote endpoint take the local-checks
+    // path: real commands, real thresholds, no scripted fixtures.
+    tags:
+      target === "this-machine" || target === "remote-device"
+        ? [LOCAL_TICKET_TAG, "ad-hoc"]
+        : ["ad-hoc"],
     requester: {
       id: "adhoc-user",
       name: request.requester?.trim() || hostname(),

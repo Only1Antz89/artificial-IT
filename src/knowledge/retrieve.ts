@@ -113,6 +113,16 @@ export interface RetrievalHit {
   matched_terms: string[];
   /** Share of the entry's own headline terms the query hit, 0-1. */
   coverage: number;
+  /**
+   * Share of the *query's* terms this entry accounted for, 0-1.
+   *
+   * The mirror image of `coverage`, and the one that catches the failure mode
+   * `coverage` cannot see: a short entry whose two nouns both appear in a long
+   * ticket about something else. "Phishing email" and "access to a colleague's
+   * mailbox" share `email` and `mailbox`, which is 40% of the mailbox entry's
+   * headline terms and 10% of what the user actually said.
+   */
+  query_coverage: number;
 }
 
 export interface RetrievalQuery {
@@ -127,8 +137,16 @@ export interface RetrievalQuery {
    *
    * This is the gate that stops a coincidental match on one common word from
    * being presented to the technician as a relevant prior ticket.
+   *
+   * Set high on purpose. On a small corpus every rare word looks important to
+   * IDF, so a ticket and an unrelated entry that happen to share "says", "site"
+   * and "fine" score well. Coverage does not care how rare the words were: it
+   * asks whether this ticket presented the way that one did, and a quarter of
+   * the symptoms is not a lead.
    */
   minCoverage?: number;
+  /** Minimum share of the query's own terms the entry must account for. */
+  minQueryCoverage?: number;
 }
 
 export function retrieve(
@@ -175,6 +193,13 @@ export function retrieve(
     }
     if (query.category && entry.category === query.category) {
       score *= 1.35;
+    } else if (query.category && entry.category !== "other") {
+      // A mismatch is evidence too. The desk's own taxonomy says these are
+      // different kinds of problem, and an access-request entry is a poor lead
+      // for a security ticket however many nouns they happen to share. Still a
+      // penalty rather than a filter: a miscategorised entry can be the right
+      // answer, it just has to earn it lexically.
+      score *= 0.6;
     }
     if (entry.outcome === "resolved") {
       score *= 1.15;
@@ -184,12 +209,15 @@ export function retrieve(
 
     const hitHeadline = matched.filter((t) => headline.has(t));
     const coverage = headline.size === 0 ? 0 : hitHeadline.length / headline.size;
+    const query_coverage =
+      queryTerms.length === 0 ? 0 : matched.length / queryTerms.length;
 
-    return { entry, score, matched_terms: matched, coverage };
+    return { entry, score, matched_terms: matched, coverage, query_coverage };
   });
 
   const minScore = query.minScore ?? 0.6;
-  const minCoverage = query.minCoverage ?? 0.12;
+  const minCoverage = query.minCoverage ?? 0.35;
+  const minQueryCoverage = query.minQueryCoverage ?? 0.15;
 
   return hits
     .filter(
@@ -197,7 +225,8 @@ export function retrieve(
         h.score >= minScore &&
         // Two independent terms, or one that is a strong identifier on its own.
         h.matched_terms.length >= 2 &&
-        h.coverage >= minCoverage,
+        h.coverage >= minCoverage &&
+        h.query_coverage >= minQueryCoverage,
     )
     .sort((a, b) => b.score - a.score)
     .slice(0, query.limit ?? 3);

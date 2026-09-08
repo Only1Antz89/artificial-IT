@@ -15,14 +15,14 @@ import { PolicyBoundGate, type ApprovalGate } from "../control-plane/approvals.j
 import type { Run } from "../contracts/index.js";
 import { KnowledgeStore } from "../knowledge/index.js";
 import {
-  InMemoryZendeskClient,
   publicReplyFor,
+  selectHelpDesk,
   ticketUpdateFor,
   toTicket,
   type ZendeskClient,
 } from "../integrations/zendesk/index.js";
 import { seedKnowledge } from "./seed-knowledge.js";
-import { DEVICE_FIELDS, SCENARIOS, TICKETS, USERS } from "./scenarios.js";
+import { DEVICE_FIELDS, SCENARIOS } from "./scenarios.js";
 import { shiftMetrics, type ShiftMetrics } from "./metrics.js";
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
 
@@ -43,6 +43,8 @@ export interface QueueResult {
   runs: Run[];
   metrics: ShiftMetrics;
   knowledgeSize: number;
+  /** Which help desk the queue came from. */
+  helpDesk: { kind: "zendesk" | "in-memory"; note: string };
 }
 
 /**
@@ -61,8 +63,12 @@ export async function runQueue(options: QueueOptions = {}): Promise<QueueResult>
   mkdirSync(workdir, { recursive: true });
 
   const selection = await selectBrainChecked(options.provider);
-  const zendesk =
-    options.zendesk ?? new InMemoryZendeskClient({ tickets: TICKETS, users: USERS });
+  // Live Zendesk when it is configured, the in-memory one otherwise. Reported
+  // on the result so a queue run never leaves you guessing which it worked.
+  const helpDesk = options.zendesk
+    ? { client: options.zendesk, kind: "in-memory" as const, note: "supplied by the caller" }
+    : selectHelpDesk();
+  const zendesk = helpDesk.client;
   const knowledge = new KnowledgeStore(`${workdir}/knowledge.jsonl`);
   seedKnowledge(knowledge);
 
@@ -121,5 +127,6 @@ export async function runQueue(options: QueueOptions = {}): Promise<QueueResult>
     runs,
     metrics: shiftMetrics(runs),
     knowledgeSize: knowledge.size(),
+    helpDesk: { kind: helpDesk.kind, note: helpDesk.note },
   };
 }

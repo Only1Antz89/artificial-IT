@@ -56,14 +56,15 @@ export const WireDiagnosis = z.object({
 });
 
 export const WireStep = z.object({
-  kind: z.enum([
-    "command",
-    "screenshot",
-    "ui_action",
-    "read_file",
-    "ask_user",
-    "knowledge_lookup",
-  ]),
+  /**
+   * What a proposal may ask for.
+   *
+   * Narrower than the `ActionKind` contract on purpose. `ui_action` needs a GUI
+   * automation backend that is not wired up, and `knowledge_lookup` and
+   * `ticket_comment` are the loop's own business - offering any of them to a
+   * model just invites proposals that cannot be carried out.
+   */
+  kind: z.enum(["command", "screenshot", "read_file", "ask_user"]),
   intent: z.string(),
   command: z.string().nullable(),
   question: z.string().nullable(),

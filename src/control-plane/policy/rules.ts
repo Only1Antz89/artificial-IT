@@ -247,6 +247,15 @@ export const BLOCKING_RULES: GuardrailRule[] = [
       // of another user". Ticket prose uses whichever it feels like.
       /\b(read|open|search|access|get\s+into)\b[^\n]{0,30}\b(another|other|someone\s+else'?s?|colleague'?s?|somebody\s+else'?s?)\b[^\n]{0,30}\b(mailbox|email|inbox|files?|messages?|account|drive)\b/i,
       /\b(read|open|search|access|get\s+into)\b[^\n]{0,30}\b(mailbox|inbox|email|files?|messages?|drive)\b[^\n]{0,30}\b(another|other|someone\s+else'?s?|colleague'?s?|somebody\s+else'?s?)\b/i,
+      // Redirecting someone else's mail is the same decision as reading it,
+      // reached by a different route. Users offer it as the "easier" option
+      // when the first request is refused, so it needs its own pattern.
+      /\b(forward|redirect|auto-?forward|divert)\b[^\n]{0,40}\b(another|other|someone\s+else'?s?|colleague'?s?|their|his|her)\b[^\n]{0,20}\b(mail|e-?mail|messages?|inbox)\b/i,
+      // The cmdlets that carry those decisions out, matched directly so the
+      // block does not depend on how the intent happened to be worded.
+      /\b(add-mailboxpermission|add-recipientpermission|grant-mailboxaccess)\b/i,
+      /\bset-mailbox\b[^\n]*-(forwarding(smtp)?address|deliverandforward)\b/i,
+      /\b(new-compliancesearch|search-mailbox|new-mailboxexportrequest)\b/i,
     ],
     reason:
       "This touches regulated or legally sensitive material and must be handled by a human through the proper process.",
@@ -270,6 +279,7 @@ export const APPROVAL_RULES: GuardrailRule[] = [
       /\bsc\s+(config|stop|start)\b/i,
       /\bbrew\s+services\s+(restart|stop)\b/i,
       /\blaunchctl\s+(unload|load|bootout)\b/i,
+      /\bcups(enable|disable)\b/i,
     ],
     reason:
       "Restarting a service interrupts whatever is using it, so a technician confirms the timing.",
@@ -309,6 +319,12 @@ export const APPROVAL_RULES: GuardrailRule[] = [
       /\bnetsh\s+(int|interface|winsock)\b[^\n]*\breset\b/i,
       /\bipconfig\s+\/(release|renew|flushdns)\b/i,
       /\bdscacheutil\s+-flushcache\b/i,
+      // The same reversible cache flush on the other platforms. Without these
+      // the fix fell through to "declared mutating", which standing policy does
+      // not pre-authorise - so a tier-1 fix that is safe by construction sat
+      // waiting for a person.
+      /\bresolvectl\s+flush-caches\b/i,
+      /\bsystemd-resolve\s+--flush-caches\b/i,
     ],
     reason:
       "Writing to system configuration is reversible but not invisible, so a technician signs it off.",
@@ -322,6 +338,21 @@ export const APPROVAL_RULES: GuardrailRule[] = [
     ],
     reason:
       "Searching for credentials can be legitimate triage or can be harvesting, so a technician decides which this is.",
+  },
+  {
+    id: "approve.clock-and-update-changes",
+    category: "routine",
+    decision: "require_approval",
+    patterns: [
+      // `sntp -s` sets the system clock; `sntp` alone only asks the time.
+      /\bsntp\b[^\n]*\s-[sS]\b/i,
+      /\bsystemsetup\s+-set/i,
+      /\bsoftwareupdate\b[^\n]*\s(-i|--install|--schedule)\b/i,
+      /\bw32tm\s+\/(resync|config)\b/i,
+      /\bnetsh\b[^\n]*\bset\b/i,
+    ],
+    reason:
+      "Changing the clock or installing updates alters the machine, so a technician signs it off.",
   },
   {
     id: "approve.process-termination",
@@ -365,7 +396,8 @@ export const READ_ONLY_COMMANDS = new Set([
   // networking (read-only)
   "ping", "traceroute", "tracert", "nslookup", "dig", "host", "ipconfig",
   "ifconfig", "ip", "netstat", "ss", "arp", "route", "curl", "wget", "nc",
-  "networksetup", "scutil", "resolvectl", "speedtest", "mtr", "getent",
+  "networksetup", "scutil", "resolvectl", "speedtest", "mtr", "getent", "netsh",
+  "sntp", "sw_vers", "softwareupdate", "w32tm",
   // windows diagnostics
   // `sc` is read-only here only because `sc config|stop|start` is caught by
   // `approve.service-restart`, which is evaluated before this allowlist.
@@ -376,6 +408,10 @@ export const READ_ONLY_COMMANDS = new Set([
   "get-computerinfo", "get-netadapter", "get-netipconfiguration", "test-netconnection",
   "get-childitem", "get-content", "get-itemproperty", "get-psdrive", "get-volume",
   "get-printer", "get-printjob", "resolve-dnsname", "get-nettcpconnection",
+  // Reading Defender's state is read-only. The mutating `Set-MpPreference
+  // -Disable...` form is a hard block in `block.security-controls`, which is
+  // evaluated long before this allowlist.
+  "get-mpcomputerstatus", "get-mpthreatdetection",
   // macos / linux diagnostics
   "system_profiler", "sw_vers", "diskutil", "pmset", "log", "sysctl", "vm_stat",
   "hostnamectl", "timedatectl",

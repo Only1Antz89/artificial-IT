@@ -98,6 +98,17 @@ These are real, and stated plainly rather than left for someone to discover:
     and there is no boundary between them. Anything dot-prefixed needs matching
     without a leading `\b`.
 
+- **A refusal freezes changes, not the whole run.** After a hard block the loop
+  keeps working the ticket read-only. This is deliberate — a technician told
+  "no, I will not delete your files" still wants to know what is filling the
+  disk — and the invariant it preserves is narrower than "the run stops":
+  nothing mutating executes for the rest of the ticket, the refused step itself
+  never runs, and the run can never be reported as resolved. Those three are
+  covered by tests in `tests/loop.test.ts`. The wider invariant ("nothing at all
+  runs after a block") was traded away knowingly; if you need it back, the flag
+  is `changesFrozen` in `src/agent/loop.ts` and turning it into a full halt is a
+  two-line change.
+
 - **Prompt injection via ticket content.** Ticket text is untrusted input and
   reaches the model. A crafted ticket could persuade a model to propose
   something harmful — which is precisely why the guardrails do not consult the

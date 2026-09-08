@@ -29,6 +29,7 @@ import { seedKnowledge } from "../demo/seed-knowledge.js";
 import { SCENARIOS, TICKETS, USERS, DEVICE_FIELDS } from "../demo/scenarios.js";
 import { LOCAL_SCENARIOS } from "../demo/run-local.js";
 import { localDangerTicket, localHealthTicket, localSession, hostPlatform } from "../demo/local.js";
+import { remoteTargetAvailable } from "../demo/adhoc.js";
 import {
   AD_HOC_TARGETS,
   adHocTicket,
@@ -36,11 +37,7 @@ import {
   localTargetAvailable,
   type AdHocRequest,
 } from "../demo/adhoc.js";
-import {
-  makeMacDnsDevice,
-  makeWindowsDnsDevice,
-  makeWindowsPrintDevice,
-} from "../demo/devices.js";
+import { sessionForTarget } from "../demo/sessions.js";
 import {
   InMemoryZendeskClient,
   publicReplyFor,
@@ -202,18 +199,7 @@ function deskQuestion(session: RunSession, deskId: string) {
 
 /** Open a session against whichever machine an ad-hoc ticket names. */
 function adHocSession(target: AdHocRequest["target"]): DeviceSession | undefined {
-  switch (target) {
-    case "simulated-windows-laptop":
-      return makeWindowsDnsDevice();
-    case "simulated-windows-desktop":
-      return makeWindowsPrintDevice();
-    case "simulated-mac-laptop":
-      return makeMacDnsDevice();
-    case "no-device":
-      return undefined;
-    default:
-      return localSession();
-  }
+  return sessionForTarget(target);
 }
 
 /**
@@ -526,9 +512,12 @@ export async function startServer(
           localAvailable: hostPlatform() !== "unknown",
           hostPlatform: hostPlatform(),
           // Targets an ad-hoc ticket can be pointed at.
-          targets: AD_HOC_TARGETS.filter(
-            (t) => t.key !== "this-machine" || localTargetAvailable(),
-          ),
+          // Only offer targets that actually exist on this deployment.
+          targets: AD_HOC_TARGETS.filter((t) => {
+            if (t.key === "this-machine") return localTargetAvailable();
+            if (t.key === "remote-device") return remoteTargetAvailable();
+            return true;
+          }),
         });
         return;
       }

@@ -7,6 +7,7 @@
  */
 import type {
   Diagnosis,
+  RiskCategory,
   Escalation,
   EscalationTrigger,
   Intake,
@@ -25,6 +26,16 @@ export interface EscalationInput {
   budgetExhausted: boolean;
   /** True when the agent believes the issue is fixed and verified. */
   resolved: boolean;
+  /**
+   * True when the agent asked to stop and hand over.
+   *
+   * The agent can ask; it cannot decline to escalate. Passing this in rather
+   * than letting the caller force-trigger the escalation afterwards means the
+   * routing and the handover are built the same way for every escalation,
+   * instead of an agent-requested one arriving at the default queue with a
+   * placeholder trigger.
+   */
+  wantsHuman?: boolean;
 }
 
 /** Phrases that mean "I want a person", checked against the user's own words. */
@@ -92,6 +103,13 @@ export function assessEscalation(input: EscalationInput): Escalation {
     triggers.add("budget-exhausted");
   }
 
+  // The agent ran out of things it could safely try. That is a real trigger,
+  // not a fallback: it is the honest answer on a ticket whose fix is a decision
+  // rather than a command.
+  if (input.wantsHuman && !resolved) {
+    triggers.add("low-confidence");
+  }
+
   // Someone who cannot work, or a VIP, should not sit in a queue behind a bot.
   const blockedUser =
     intake?.user_sentiment === "blocked" || intake?.user_sentiment === "urgent";
@@ -121,19 +139,54 @@ export function assessEscalation(input: EscalationInput): Escalation {
     triggered: true,
     triggers: [...triggers],
     urgency,
-    route_to: routeFor([...triggers]),
+    route_to: routeFor([...triggers], input),
     ask: askFor([...triggers]),
     handover: buildHandover(input),
     raised_at: nowIso(),
   };
 }
 
+/**
+ * The team a blocked risk category actually belongs to.
+ *
+ * Routing every guardrail block to tier 2 is what makes an escalation feel
+ * like a dead end: a request to disable Defender is not a service-desk
+ * decision, and a request to read a colleague's mailbox is not a technical one
+ * at all. Ordered by which team should see it first when more than one
+ * category fired.
+ */
+const TEAM_FOR_CATEGORY: [RiskCategory, string][] = [
+  ["security-controls", "security-operations"],
+  ["data-exfiltration", "security-operations"],
+  ["compliance", "information-governance"],
+  ["finance", "finance-systems"],
+  ["identity", "identity-and-access"],
+  ["credentials", "identity-and-access"],
+  ["network-infrastructure", "network-engineering"],
+  ["major-system-change", "endpoint-engineering"],
+];
+
 /** Send the ticket where the authority to act actually sits. */
-function routeFor(triggers: EscalationTrigger[]): string {
+function routeFor(triggers: EscalationTrigger[], input: EscalationInput): string {
   if (triggers.includes("needs-hands-on")) return "field-services";
-  if (triggers.includes("policy-block") || triggers.includes("requires-authority")) {
+
+  if (triggers.includes("policy-block")) {
+    const blockedCategories = new Set(
+      input.results
+        .filter((r) => r.outcome === "blocked")
+        .flatMap((r) => r.verdict.categories),
+    );
+    for (const [category, team] of TEAM_FOR_CATEGORY) {
+      if (blockedCategories.has(category)) return team;
+    }
     return "service-desk-tier-2";
   }
+
+  // Nothing was blocked, but the ticket itself is a security report. Those go
+  // to the people who can look at the mail gateway, not to a desk technician.
+  if (input.intake?.category === "security") return "security-operations";
+
+  if (triggers.includes("requires-authority")) return "service-desk-tier-2";
   if (triggers.includes("out-of-scope")) return "service-desk-triage";
   return "service-desk-tier-2";
 }

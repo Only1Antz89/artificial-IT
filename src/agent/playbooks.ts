@@ -20,6 +20,16 @@ export interface PlaybookStep {
   rollbackCommand?: string;
   /** Substring that, if present in stdout, indicates the fault was found. */
   faultSignal?: string;
+  /**
+   * A predicate over the step's real output, for faults a substring cannot
+   * express.
+   *
+   * "The volume is over 90% full" and "the Wi-Fi signal is under 40%" are both
+   * numbers, not words. Matching them by substring means hardcoding `96%`,
+   * which is matching the fixture rather than the fault. A predicate reads the
+   * number and compares it, which is what a technician does.
+   */
+  faultWhen?: (output: string) => boolean;
 }
 
 export interface Playbook {
@@ -47,7 +57,125 @@ export interface Playbook {
 
 const NONE: PlaybookStep[] = [];
 
+/**
+ * Read a percentage-used figure out of a disk report.
+ *
+ * `df -h /` puts it in a `Capacity`/`Use%` column; `wmic logicaldisk` gives raw
+ * free and total bytes instead, so both shapes are handled here rather than in
+ * two near-identical predicates.
+ */
+export function diskPercentUsed(output: string): number | undefined {
+  const pct = output.match(/(\d{1,3})%/);
+  if (pct) return Number(pct[1]);
+  // wmic: "FreeSpace  Name  Size" then a row of numbers.
+  const nums = output.match(/\b\d{9,}\b/g);
+  if (nums && nums.length >= 2) {
+    const free = Number(nums[0]);
+    const size = Number(nums[1]);
+    if (size > 0 && free <= size) return Math.round(((size - free) / size) * 100);
+  }
+  return undefined;
+}
+
+/** True when the volume is full enough that writes are about to start failing. */
+function diskIsFull(output: string): boolean {
+  const used = diskPercentUsed(output);
+  return used !== undefined && used >= 90;
+}
+
+/** Wi-Fi signal quality as a percentage, from `netsh wlan show interfaces`. */
+export function wifiSignalPercent(output: string): number | undefined {
+  const m = output.match(/^\s*Signal\s*:\s*(\d{1,3})\s*%/im);
+  return m ? Number(m[1]) : undefined;
+}
+
+/** File types that have no business arriving by email. */
+const RISKY_ATTACHMENT = /\.(exe|scr|com|pif|hta|js|jse|vbs|vbe|wsf|ps1|jar|iso|img|docm|xlsm|pptm|lnk)\b/i;
+
+/** True when the Downloads listing contains something worth a security look. */
+function riskyDownload(output: string): boolean {
+  return RISKY_ATTACHMENT.test(output);
+}
+
+/** True when the link is too weak to hold a tunnel up reliably. */
+function wifiIsWeak(output: string): boolean {
+  const pct = wifiSignalPercent(output);
+  if (pct !== undefined) return pct < 40;
+  const dbm = Number(output.match(/(-\d{2,3})\s*dBm/i)?.[1] ?? NaN);
+  return Number.isFinite(dbm) && dbm < -75;
+}
+
 export const PLAYBOOKS: Playbook[] = [
+  {
+    // Ordered before pb.dns-resolution deliberately: a VPN ticket almost always
+    // also says "cannot reach", which the DNS pattern would claim first.
+    id: "pb.vpn-drop",
+    category: "connectivity",
+    match: /\b(vpn|globalprotect|anyconnect|always[\s-]?on\s+tunnel|remote\s+access\s+client)\b/i,
+    hypotheses: [
+      { statement: "The underlying Wi-Fi link is too weak to hold the tunnel up, so the client reconnects in a loop.", confidence: "medium" },
+      { statement: "The Wi-Fi adapter's power-saving setting is suspending the radio when idle.", confidence: "medium" },
+      { statement: "The VPN concentrator is dropping sessions server-side.", confidence: "low" },
+    ],
+    diagnostics: {
+      windows: [
+        { intent: "Confirm the adapter has an address and a default gateway", command: "ipconfig /all", mutating: false },
+        { intent: "Measure the wireless link the tunnel is running over", command: "netsh wlan show interfaces", mutating: false, faultWhen: wifiIsWeak },
+        { intent: "Confirm the VPN client is actually running", command: "tasklist", mutating: false },
+      ],
+      macos: [
+        { intent: "Confirm the interface has an address", command: "ifconfig en0", mutating: false },
+        { intent: "Measure the wireless link the tunnel is running over", command: "system_profiler SPAirPortDataType", mutating: false, faultWhen: wifiIsWeak },
+      ],
+      linux: [
+        { intent: "Confirm the interface has an address", command: "ip addr", mutating: false },
+        { intent: "Measure the wireless link the tunnel is running over", command: "cat /proc/net/wireless", mutating: false, faultWhen: wifiIsWeak },
+      ],
+      unknown: NONE,
+    },
+    // Deliberately empty on every platform. The fault is radio conditions in
+    // the room the user is sitting in; there is no command on the device that
+    // makes the signal stronger, and pretending otherwise would be theatre.
+    fixes: { windows: NONE, macos: NONE, linux: NONE, unknown: NONE },
+    rootCause:
+      "The wireless link the tunnel runs over is too weak to sustain it, so the VPN client drops and reconnects.",
+    prevention: [
+      "Ship a wired-adapter or tethering guidance note with travel laptops.",
+      "Alert on VPN sessions that reconnect more than three times in an hour.",
+    ],
+  },
+  {
+    id: "pb.phishing-report",
+    category: "security",
+    match: /\b(phish|phishing|suspicious\s+(e-?mail|message|link)|scam\s+e-?mail|spoofed?|malware|ransomware|virus|clicked\s+(on\s+)?a\s+link)\b/i,
+    hypotheses: [
+      { statement: "The message is a credential-harvesting phish and nothing was executed on the device.", confidence: "medium" },
+      { statement: "An attachment was downloaded and possibly opened, so the endpoint needs checking.", confidence: "medium" },
+      { statement: "The message is legitimate but unfamiliar to the user.", confidence: "low" },
+    ],
+    diagnostics: {
+      windows: [
+        { intent: "Check whether anything from the message was downloaded", command: "Get-ChildItem $env:USERPROFILE\\Downloads", mutating: false, faultWhen: riskyDownload },
+        { intent: "Confirm endpoint protection is running and current", command: "Get-MpComputerStatus", mutating: false },
+      ],
+      macos: [
+        { intent: "Check whether anything from the message was downloaded", command: "ls -lt ~/Downloads", mutating: false, faultWhen: riskyDownload },
+      ],
+      linux: [
+        { intent: "Check whether anything from the message was downloaded", command: "ls -lt ~/Downloads", mutating: false, faultWhen: riskyDownload },
+      ],
+      unknown: NONE,
+    },
+    // Quarantine, mailbox purge and credential resets all belong to the
+    // security team, and every one of them crosses a guardrail anyway.
+    fixes: { windows: NONE, macos: NONE, linux: NONE, unknown: NONE },
+    rootCause:
+      "A suspicious message reached the user's mailbox and an executable or archive attachment was downloaded to the device.",
+    prevention: [
+      "Add the sending domain to the mail gateway block list.",
+      "Re-run targeted phishing simulation for the affected team.",
+    ],
+  },
   {
     id: "pb.dns-resolution",
     category: "connectivity",
@@ -188,14 +316,14 @@ export const PLAYBOOKS: Playbook[] = [
     ],
     diagnostics: {
       windows: [
-        { intent: "Check free space on the system volume", command: "wmic logicaldisk get name,freespace,size", mutating: false, faultSignal: "" },
+        { intent: "Check free space on the system volume", command: "wmic logicaldisk get name,freespace,size", mutating: false, faultWhen: diskIsFull },
       ],
       macos: [
-        { intent: "Check free space on the system volume", command: "df -h /", mutating: false },
+        { intent: "Check free space on the system volume", command: "df -h /", mutating: false, faultWhen: diskIsFull },
         { intent: "Find the largest directories in the user profile", command: "du -sh /Users", mutating: false },
       ],
       linux: [
-        { intent: "Check free space on the system volume", command: "df -h /", mutating: false },
+        { intent: "Check free space on the system volume", command: "df -h /", mutating: false, faultWhen: diskIsFull },
         { intent: "Find the largest directories on the volume", command: "du -sh /var", mutating: false },
       ],
       unknown: NONE,
@@ -326,6 +454,27 @@ export const REQUESTED_ACTIONS: RequestedAction[] = [
     match: /\badd\b[^\n]{0,40}\bto the\b[^\n]{0,30}\bgroup\b/i,
     intent: "Add the new account to the Finance-Reporting group",
     command: "Add-ADGroupMember -Identity Finance-Reporting -Members rokafor",
+  },
+  {
+    id: "req.mailbox-access",
+    match: /\b(access|open|read|get\s+into|delegate)\b[^\n]{0,40}\b(mailbox|inbox|e-?mail)\b|\bshared\s+mailbox\b[^\n]{0,40}\b(access|permission)\b/i,
+    intent: "Grant the requester full access to the colleague's mailbox",
+    command: "Add-MailboxPermission -Identity h.nakamura -User m.lyle -AccessRights FullAccess",
+    platformCommands: {
+      windows: "Add-MailboxPermission -Identity h.nakamura -User m.lyle -AccessRights FullAccess",
+    },
+  },
+  {
+    id: "req.mail-forward",
+    match: /\b(forward|redirect|copy)\b[^\n]{0,40}\b(their|his|her|the\s+other|colleague'?s?)\b[^\n]{0,20}\b(e-?mail|mail|messages?)\b/i,
+    intent: "Forward the colleague's incoming mail to the requester",
+    command: "Set-Mailbox h.nakamura -ForwardingSMTPAddress marcus.lyle@example.com",
+  },
+  {
+    id: "req.quarantine-release",
+    match: /\b(release|restore|let\s+through|un-?quarantine)\b[^\n]{0,40}\b(quarantine|blocked\s+e-?mail|junk)\b/i,
+    intent: "Release the quarantined message back into the mailbox",
+    command: "Release-QuarantineMessage -Identity suspicious-message -User priya.raman@example.com",
   },
   {
     id: "req.corporate-card",

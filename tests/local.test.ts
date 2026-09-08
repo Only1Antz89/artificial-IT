@@ -234,8 +234,17 @@ describeIfSupported("running against this machine", () => {
     expect(categories.has("destructive")).toBe(true);
     expect(categories.has("security-controls")).toBe(true);
 
-    // Nothing ran at all: no command result exists on any step.
-    expect(run.results.every((r) => r.command === undefined)).toBe(true);
+    // Nothing that was refused ran, and nothing on this machine was changed.
+    // Read-only checks may still have run afterwards - a refusal freezes
+    // changes, not the investigation - so the invariant is about mutation, not
+    // about the run stopping dead.
+    for (const r of run.results) {
+      if (r.outcome === "blocked") expect(r.command).toBeUndefined();
+      if (r.step.mutating) expect(r.command).toBeUndefined();
+    }
+    expect(run.results.some((r) => r.outcome === "success" && r.step.mutating)).toBe(
+      false,
+    );
     expect(run.status).toBe("escalated");
   });
 

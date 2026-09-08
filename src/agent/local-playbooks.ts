@@ -58,6 +58,25 @@ export interface LocalCheck {
   interpret: (result: CommandResult) => string | undefined;
   /** What "all clear" looks like in words, for the healthy write-up. */
   healthy: (result: CommandResult) => string;
+  /**
+   * A fix for the fault this check finds, where a safe one exists.
+   *
+   * Most checks have none, and that is the honest answer: a full disk is fixed
+   * by a person deciding what to delete, and a failing battery by replacing it.
+   * A fix belongs here only when it is reversible, needs no elevation, and
+   * addresses the exact fault the interpreter reported.
+   */
+  fix?: LocalFix;
+}
+
+export interface LocalFix {
+  intent: string;
+  command: Partial<Record<HostPlatform, string>>;
+  requires: Partial<Record<HostPlatform, string>>;
+  /** In prose, for the ticket. */
+  rollback: string;
+  /** A command that reverses it, where one exists. */
+  rollbackCommand?: Partial<Record<HostPlatform, string>>;
 }
 
 /* ------------------------------------------------------------------ *
@@ -206,6 +225,20 @@ export const LOCAL_CHECKS: LocalCheck[] = [
     },
     healthy: (r) =>
       `Name resolution is working: ${r.stdout.trim().split("\n")[0] ?? "resolved"}`,
+    fix: {
+      intent: "Clear the stale DNS resolver cache",
+      command: {
+        macos: "dscacheutil -flushcache",
+        linux: "resolvectl flush-caches",
+        windows: "ipconfig /flushdns",
+      },
+      requires: { macos: "dscacheutil", linux: "resolvectl", windows: "ipconfig" },
+      // Genuinely reversible by doing nothing: the cache refills from the
+      // configured resolvers on the next lookup. Saying so is more honest than
+      // inventing an undo command that would only flush it again.
+      rollback:
+        "Nothing to undo - the resolver cache refills itself from the configured DNS servers on the next lookup.",
+    },
   },
   {
     id: "check.network",
@@ -269,6 +302,16 @@ export const LOCAL_CHECKS: LocalCheck[] = [
     },
     healthy: (r) =>
       r.stdout.trim() ? "Print queues are accepting jobs." : "No printers are configured on this machine.",
+    fix: {
+      intent: "Re-enable the print queue so jobs can leave the machine",
+      command: {
+        macos: "cupsenable --all",
+        linux: "cupsenable --all",
+      },
+      requires: { macos: "cupsenable", linux: "cupsenable" },
+      rollback: "Disable the queue again with `cupsdisable --all`.",
+      rollbackCommand: { macos: "cupsdisable --all", linux: "cupsdisable --all" },
+    },
   },
   {
     id: "check.power",
@@ -290,6 +333,138 @@ export const LOCAL_CHECKS: LocalCheck[] = [
         : undefined;
     },
     healthy: (r) => `Power state read: ${r.stdout.trim().split("\n")[0] ?? "ok"}`,
+  },
+  {
+    id: "check.wifi",
+    relevantTo: ["connectivity"],
+    intent: "Check the wireless connection and signal strength",
+    command: {
+      // `wdutil` is the supported reader on modern macOS; the old `airport`
+      // binary was removed in Sonoma, so reaching for it would fail on any
+      // current Mac.
+      macos: "system_profiler SPAirPortDataType",
+      linux: "cat /proc/net/wireless",
+      windows: "netsh wlan show interfaces",
+    },
+    requires: { macos: "system_profiler", linux: "cat", windows: "netsh" },
+    interpret: (r) => {
+      const rssi = Number(
+        r.stdout.match(/Signal\s*\/\s*Noise:\s*(-?\d+)/i)?.[1] ??
+          r.stdout.match(/Signal[^\n]*?(-\d{2,3})\s*dBm/i)?.[1] ??
+          NaN,
+      );
+      if (Number.isFinite(rssi) && rssi < -75) {
+        return `Wireless signal is weak at ${rssi} dBm, which will cause drops and slow transfers.`;
+      }
+      return /Status:\s*Off|not associated|disconnected/i.test(r.stdout)
+        ? "The wireless interface is off or not associated with a network."
+        : undefined;
+    },
+    healthy: (r) => {
+      const ssid = r.stdout.match(/Current Network Information:\s*\n\s*(.+?):/)?.[1];
+      return ssid ? `Connected to ${ssid.trim()} with usable signal.` : "Wireless looks healthy.";
+    },
+  },
+  {
+    id: "check.vpn",
+    relevantTo: ["connectivity"],
+    intent: "Check whether a VPN tunnel is up",
+    command: {
+      macos: "ifconfig",
+      linux: "ip -br link",
+      windows: "ipconfig",
+    },
+    requires: { macos: "ifconfig", linux: "ip", windows: "ipconfig" },
+    interpret: () =>
+      // A VPN being up or down is context, not a fault - it changes what a
+      // connectivity problem means, and the technician reads it from `healthy`.
+      undefined,
+    healthy: (r) =>
+      /\b(utun|tun0|ppp0|tap0)\b/i.test(r.stdout)
+        ? "A VPN tunnel is up, so internal names should resolve."
+        : "No VPN tunnel is up.",
+  },
+  {
+    id: "check.time",
+    relevantTo: ["authentication", "security", "email"],
+    intent: "Check the clock is in sync",
+    command: {
+      // Clock drift breaks Kerberos, certificates and MFA codes, and presents
+      // as "I cannot sign in to anything" - worth ruling out early.
+      // No -s or -S: those *set* the clock. This only asks it the time.
+      macos: "sntp time.apple.com",
+      linux: "timedatectl status",
+      windows: "w32tm /query /status",
+    },
+    requires: { macos: "sntp", linux: "timedatectl", windows: "w32tm" },
+    interpret: (r) => {
+      const offset = Number(r.stdout.match(/([+-]\d+\.\d+)\s*\+\/-/)?.[1] ?? NaN);
+      if (Number.isFinite(offset) && Math.abs(offset) > 60) {
+        return `The clock is ${Math.round(Math.abs(offset))}s out, which will break sign-in and certificate checks.`;
+      }
+      return /synchronized:\s*no|NTP service:\s*inactive/i.test(r.stdout)
+        ? "The clock is not synchronised with a time server."
+        : undefined;
+    },
+    healthy: () => "The clock is in sync.",
+  },
+  {
+    id: "check.battery-health",
+    relevantTo: ["hardware"],
+    intent: "Check battery condition",
+    command: {
+      macos: "system_profiler SPPowerDataType",
+      linux: "cat /sys/class/power_supply/BAT0/status",
+      windows: "wmic path Win32_Battery get BatteryStatus",
+    },
+    requires: { macos: "system_profiler", linux: "cat", windows: "wmic" },
+    interpret: (r) => {
+      const condition = r.stdout.match(/Condition:\s*(.+)/i)?.[1]?.trim();
+      return condition && !/normal|good/i.test(condition)
+        ? `The battery reports its condition as "${condition}", which needs replacing rather than fixing.`
+        : undefined;
+    },
+    healthy: (r) => {
+      const cycles = r.stdout.match(/Cycle Count:\s*(\d+)/i)?.[1];
+      return cycles ? `Battery is healthy at ${cycles} cycles.` : "Battery condition is normal.";
+    },
+  },
+  {
+    id: "check.updates",
+    relevantTo: ["security", "software"],
+    intent: "Check for pending system updates",
+    command: {
+      // `--no-scan` reads the cached list rather than contacting Apple, which
+      // keeps a diagnostic step from taking a minute.
+      macos: "softwareupdate -l --no-scan",
+      linux: "cat /var/lib/update-notifier/updates-available",
+      windows: "wmic qfe get HotFixID,InstalledOn",
+    },
+    requires: { macos: "softwareupdate", linux: "cat", windows: "wmic" },
+    interpret: (r) =>
+      /restart required|security update|deferred/i.test(r.stdout)
+        ? "There are pending updates, including at least one that needs a restart."
+        : undefined,
+    healthy: (r) =>
+      /No new software available/i.test(r.stdout)
+        ? "The machine is up to date."
+        : "Update state read.",
+  },
+  {
+    id: "check.disk-health",
+    relevantTo: ["hardware", "storage"],
+    intent: "Check the disk is not reporting failures",
+    command: {
+      macos: "diskutil info -all",
+      linux: "lsblk -o NAME,SIZE,STATE",
+      windows: "wmic diskdrive get model,status",
+    },
+    requires: { macos: "diskutil", linux: "lsblk", windows: "wmic" },
+    interpret: (r) =>
+      /SMART Status:\s*(?!Verified)|Failing|Pred Fail/i.test(r.stdout)
+        ? "The disk is reporting a SMART failure. Back the machine up before doing anything else."
+        : undefined,
+    healthy: () => "The disk reports no hardware faults.",
   },
   {
     id: "check.top-processes",
@@ -332,6 +507,27 @@ export function checksFor(
     const requires = check.requires[platform];
     return Boolean(command) && Boolean(requires) && available.has(requires!);
   });
+}
+
+/** The fix for a check, when this host can actually run it. */
+export function fixFor(
+  check: LocalCheck,
+  platform: HostPlatform,
+  availableCommands: string[],
+): { command: string; rollback: string; rollbackCommand?: string; intent: string } | undefined {
+  const fix = check.fix;
+  if (!fix) return undefined;
+  const command = fix.command[platform];
+  const requires = fix.requires[platform];
+  if (!command || !requires || !availableCommands.includes(requires)) return undefined;
+  return {
+    intent: fix.intent,
+    command,
+    rollback: fix.rollback,
+    ...(fix.rollbackCommand?.[platform]
+      ? { rollbackCommand: fix.rollbackCommand[platform] }
+      : {}),
+  };
 }
 
 /**

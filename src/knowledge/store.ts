@@ -33,7 +33,15 @@ export const KnowledgeEntry = z.object({
   cautions: z.array(z.string()).default([]),
   /** Times this entry has been retrieved and led to a resolved run. */
   times_applied: z.number().int().min(0).default(0),
-  outcome: z.enum(["resolved", "escalated"]),
+  /**
+   * How the source ticket ended.
+   *
+   * `unresolved` is a real outcome, not a gap in the data: the user stopped
+   * reporting it, or it went away on its own. Recording it as `escalated`
+   * would be a lie, and recording nothing would lose the fact that this class
+   * of symptom has come up before without ever being explained.
+   */
+  outcome: z.enum(["resolved", "escalated", "unresolved"]),
   learned_at: IsoDateTime,
 });
 export type KnowledgeEntry = z.infer<typeof KnowledgeEntry>;

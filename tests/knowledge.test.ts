@@ -198,3 +198,76 @@ describe("learning is skipped when there is nothing to learn", () => {
     expect(kb.size()).toBe(0);
   });
 });
+
+describe("precision on a seeded knowledge base", () => {
+  function seeded(): KnowledgeStore {
+    const store = new KnowledgeStore(join(workdir, "kb.jsonl"));
+    seedKnowledge(store);
+    return store;
+  }
+
+  function hitsFor(id: number): string[] {
+    const t = TICKETS.find((x) => x.id === id)!;
+    return retrieve(seeded().all(), { text: `${t.subject}\n${t.description}` }).map(
+      (h) => h.entry.id,
+    );
+  }
+
+  it("finds the phishing entry for a phishing ticket, not the mailbox one", () => {
+    // Both entries contain "mailbox" and "email". Only one of them is about
+    // what happened to this user.
+    expect(hitsFor(4828)).toEqual(["kb_seed_phishing"]);
+  });
+
+  it("finds the mailbox entry for a mailbox-access request", () => {
+    expect(hitsFor(4829)).toEqual(["kb_seed_mailbox"]);
+  });
+
+  it("finds the VPN entry for a dropping VPN", () => {
+    expect(hitsFor(4827)).toEqual(["kb_seed_vpn"]);
+  });
+
+  it("returns nothing for the tickets no seeded entry covers", () => {
+    // The DNS fault is deliberately absent from the seed data - the agent has
+    // to find it by running the checks. A hit here would mean the demo was
+    // proving retrieval rather than diagnosis.
+    for (const id of [4821, 4822, 4824, 4825, 4826]) {
+      expect(hitsFor(id), `ticket ${id}`).toEqual([]);
+    }
+  });
+
+  it("rejects a match that covers a quarter of an entry's symptoms", () => {
+    const store = seeded();
+    const loose = retrieve(store.all(), {
+      text: "It says the site is fine but I cannot get on before the end of the day",
+      minCoverage: 0,
+      minQueryCoverage: 0,
+    });
+    // With the gates off, something matches. With them on, nothing does.
+    expect(loose.length).toBeGreaterThan(0);
+    expect(
+      retrieve(store.all(), {
+        text: "It says the site is fine but I cannot get on before the end of the day",
+      }),
+    ).toEqual([]);
+  });
+
+  it("penalises an entry whose category contradicts the ticket's", () => {
+    const store = seeded();
+    const text = "OneDrive says sync is paused and files are not uploading";
+    const asStorage = retrieve(store.all(), { text, category: "storage" });
+    const asSecurity = retrieve(store.all(), { text, category: "security" });
+    const storageScore = asStorage.find((h) => h.entry.id === "kb_seed_onedrive_full")!.score;
+    const securityHit = asSecurity.find((h) => h.entry.id === "kb_seed_onedrive_full");
+    expect(storageScore).toBeGreaterThan(securityHit?.score ?? 0);
+  });
+
+  it("reports how much of the query an entry accounted for", () => {
+    const store = seeded();
+    const [hit] = retrieve(store.all(), {
+      text: "My VPN keeps dropping and reconnects on its own then drops again every few minutes",
+    });
+    expect(hit!.query_coverage).toBeGreaterThan(0.2);
+    expect(hit!.query_coverage).toBeLessThanOrEqual(1);
+  });
+});
