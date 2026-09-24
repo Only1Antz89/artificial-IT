@@ -87,10 +87,22 @@ describe("static surface", () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html.toLowerCase()).toContain("technician console");
-    // The favicon stays inlined; the one external request the page makes is
-    // for the design tokens both surfaces share.
     expect(html).toContain('rel="icon"');
     expect(html).toContain('href="/assets/theme.css"');
+    expect(html).toContain('/assets/momentum-logo-reversed.png');
+  });
+
+  it("serves the Momentum brand assets", async () => {
+    for (const file of [
+      "momentum-logo-positive.png",
+      "momentum-logo-reversed.png",
+      "momentum-mark.png",
+    ]) {
+      const res = await fetch(`${base}/assets/${file}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("image/png");
+      expect((await res.arrayBuffer()).byteLength).toBeGreaterThan(1_000);
+    }
   });
 
   it("serves the shared design tokens to both surfaces", async () => {

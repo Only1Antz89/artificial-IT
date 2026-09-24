@@ -169,9 +169,10 @@ export class TicketDesk {
   /** Add a progress note in the user's language. */
   note(id: string, text: string): void {
     this.update(id, (ticket) => {
-      const last = ticket.updates[ticket.updates.length - 1];
-      // A run emits many events; the user does not need the same sentence twice.
-      if (last?.text === text) return;
+      // A multi-step repair can enter the same user-facing phase more than
+      // once. Keep every technical event in the run, but show each plain-
+      // language milestone only once on the user's timeline.
+      if (ticket.updates.some((update) => update.text === text)) return;
       ticket.updates.push({ at: new Date().toISOString(), text });
     });
   }

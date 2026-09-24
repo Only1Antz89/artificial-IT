@@ -111,6 +111,24 @@ describe("the user's view is built by allowing, not by redacting", () => {
     expect(userUpdateFor({ type: "policy.evaluated" })).toBeUndefined();
   });
 
+  it("shows a repeated user-facing phase only once", () => {
+    const desk = new TicketDesk();
+    const ticket = desk.submit({
+      reportedBy: "Priya",
+      description: "The printer queue is stuck again.",
+      summary: "Printer queue stuck",
+      target: "simulated-windows-desktop",
+      consentGranted: true,
+    });
+
+    desk.note(ticket.id, "A technician is checking the proposed fix.");
+    desk.note(ticket.id, "A change is being applied.");
+    desk.note(ticket.id, "A technician is checking the proposed fix.");
+
+    const updates = desk.get(ticket.id)!.updates.map((update) => update.text);
+    expect(updates.filter((text) => text === "A technician is checking the proposed fix.")).toHaveLength(1);
+  });
+
   it("maps a finished run onto language a user understands", () => {
     const run = (status: Run["status"]) => ({ status }) as Run;
     expect(statusForRun(run("resolved"))).toBe("resolved");

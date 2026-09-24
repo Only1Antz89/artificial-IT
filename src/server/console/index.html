@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AIT — Technician Console</title>
+<title>Momentum AIT — Technician Console</title>
 <link rel="stylesheet" href="/assets/theme.css">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231a56db'/%3E%3Ctext x='16' y='22' font-family='system-ui,sans-serif' font-size='15' font-weight='700' fill='white' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E">
+<link rel="icon" type="image/png" href="/assets/momentum-mark.png">
 <style>
   /*
    * The technician's half.
@@ -21,34 +21,34 @@
    * belongs in the shared file, not in this one.
    */
   :root{
-    --accent:#1a56db; --accent-ink:#fff; --accent-soft:#eaf0ff; --accent-line:#b9ccfb;
+    --accent:#163e58; --accent-ink:#fff; --accent-soft:#eaf1f5; --accent-line:#b8cdd9;
   }
   @media (prefers-color-scheme:dark){
     :root{
-      --accent:#6f9bff; --accent-ink:#08111f; --accent-soft:#10192c; --accent-line:#2a3d63;
+      --accent:#8fc2dd; --accent-ink:#08111f; --accent-soft:#102432; --accent-line:#31566c;
     }
   }
   html,body{height:100%}
   body{font-size:14.5px;line-height:1.55}
 
   header{
-    border-bottom:1px solid var(--line); background:var(--panel);
-    padding:14px 22px; display:flex; align-items:center; gap:16px;
+    border-bottom:3px solid var(--brand-orange); background:var(--brand-navy-deep);
+    padding:13px 22px; display:flex; align-items:center; gap:16px;
     flex-wrap:wrap; position:sticky; top:0; z-index:20;
   }
-  .brand{font-weight:700; font-size:15px; letter-spacing:-.01em; line-height:1.25}
-  .brand span{display:block; color:var(--muted); font-weight:400; font-size:11.5px;
-    letter-spacing:.05em; text-transform:uppercase}
+  header .brand-logo{height:27px}
+  header .product-name{color:#fff;border-left-color:rgba(255,255,255,.28)}
+  header .product-name span{color:rgba(255,255,255,.65)}
   .chips{display:flex; gap:7px; flex-wrap:wrap; margin-left:auto}
   .chip{
     font-size:11.5px; padding:3.5px 10px; border-radius:999px;
-    border:1px solid var(--line); background:var(--panel-2); color:var(--muted);
+    border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.07); color:rgba(255,255,255,.72);
     display:inline-flex; align-items:center; gap:6px; white-space:nowrap;
   }
-  .dot{width:7px;height:7px;border-radius:50%;background:var(--muted);flex:none}
-  .chip.ready .dot{background:var(--ok)} .chip.ready{color:var(--ok);border-color:var(--ok-line)}
-  .chip.warn .dot{background:var(--warn)} .chip.warn{color:var(--warn);border-color:var(--warn-line)}
-  .chip.bad .dot{background:var(--stop)} .chip.bad{color:var(--stop);border-color:var(--stop-line)}
+  .dot{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.5);flex:none}
+  .chip.ready .dot{background:#6fe0ac} .chip.ready{color:#baf4d8;border-color:rgba(111,224,172,.42)}
+  .chip.warn .dot{background:#f6c66a} .chip.warn{color:#ffe0a1;border-color:rgba(246,198,106,.42)}
+  .chip.bad .dot{background:#ff9d95} .chip.bad{color:#ffc7c2;border-color:rgba(255,157,149,.42)}
 
   .layout{display:grid; grid-template-columns:330px minmax(0,1fr); gap:22px;
     max-width:1340px; margin:0 auto; padding:22px}
@@ -212,9 +212,19 @@
   .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;
     padding:16px 17px;border-bottom:1px solid var(--line)}
 
-  .portal-link{margin-left:14px;font-size:12.5px;color:var(--accent);text-decoration:none;
-    border:1px solid var(--line);padding:5px 11px;border-radius:999px}
-  .portal-link:hover{border-color:var(--accent)}
+  .portal-link{margin-left:8px;font-size:12.5px;color:#fff;text-decoration:none;
+    border:1px solid rgba(255,255,255,.28);padding:6px 12px;border-radius:999px}
+  .portal-link:hover{border-color:var(--brand-orange);background:rgba(255,255,255,.06)}
+  .empty-logo{display:block;width:138px;height:auto;margin:0 auto 20px}
+
+  @media (max-width:640px){
+    header{padding:12px 16px;gap:11px}
+    header .brand-logo{height:23px}
+    header .product-name{font-size:12.5px;padding-left:10px}
+    header .product-name span{display:none}
+    .portal-link{margin-left:auto}
+    .chips{width:100%;margin-left:0}
+  }
   .count{background:var(--accent);color:var(--accent-ink);border-radius:999px;
     padding:1px 8px;font-size:11px;margin-left:6px}
   .count:empty{display:none}
@@ -235,19 +245,84 @@
   .tk .badge.resolved{background:var(--ok-bg);color:var(--ok);border-color:var(--ok-line)}
   .tk .badge.escalated{background:var(--warn-bg);color:var(--warn);border-color:var(--warn-line)}
   .tk .badge.you{background:var(--stop-bg);color:var(--stop);border-color:var(--stop-line)}
+
+  /* 2026 workspace redesign: three purposeful zones, one operational canvas. */
+  body{background:#eef2f5;color:#102235;overflow-x:hidden}
+  header{min-height:64px;padding:0 24px;border-bottom:0;box-shadow:0 1px 0 rgba(255,255,255,.12)}
+  header::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--brand-orange)}
+  header .brand-logo{height:30px}
+  header .product-name{font-size:15px;font-weight:650}
+  .portal-link{order:3;margin-left:4px;border-radius:4px;padding:7px 12px}
+  .chips{margin-left:auto}
+  .chip{border-radius:4px;padding:4px 8px}
+  .layout{max-width:none;margin:0;padding:0;gap:0;display:grid;
+    grid-template-columns:310px minmax(520px,1fr) 330px;min-height:calc(100vh - 64px)}
+  .queue-rail,.utility-rail{position:sticky;top:64px;height:calc(100vh - 64px);overflow:auto;
+    align-self:start;background:#f8fafb;display:flex;flex-direction:column;gap:0}
+  .queue-rail{border-right:1px solid #d8e0e7}
+  .utility-rail{border-left:1px solid #d8e0e7}
+  .incident-pane{min-width:0;padding:28px 30px 54px;background:#fff}
+  .rail-heading{padding:22px 18px 14px;border-bottom:1px solid var(--line)}
+  .rail-heading .eyebrow{font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);font-weight:750}
+  .rail-heading h1{font-size:20px;margin:3px 0 0;letter-spacing:-.02em}
+  .queue-rail .card,.utility-rail .card{border:0;border-radius:0;background:transparent;box-shadow:none}
+  .queue-rail .card + .card,.utility-rail .card + .card{border-top:1px solid var(--line)}
+  .card > h2{padding:13px 18px;background:#f3f6f8;color:#43566b;font-size:10.5px;letter-spacing:.11em}
+  .inbox{max-height:none}
+  .tk{padding:14px 18px;background:#fff}
+  .tk:hover{background:#f5f9fc}
+  .tk.active{background:#e8f2f9;box-shadow:inset 3px 0 0 #1672ad}
+  .tk .s{font-size:13.5px}
+  .utility-rail .body{padding:16px 18px}
+  .utility-rail textarea{min-height:96px}
+  .utility-rail button.primary{background:var(--brand-orange);border-color:var(--brand-orange);border-radius:4px}
+  .utility-rail button.ghost,.tabs .tab{border-radius:4px}
+  .stage{min-height:calc(100vh - 146px);border:0;border-radius:0;background:#fff}
+  .stage>.empty{min-height:calc(100vh - 146px);justify-content:center;border:1px dashed #ccd7df}
+  .empty-logo{width:154px}
+  .runhead{padding:0 0 22px;margin-bottom:6px}
+  .runhead .t{font-size:24px;line-height:1.25;letter-spacing:-.025em}
+  .runhead .d{font-size:13.5px;margin-top:7px}
+  .status{border-radius:4px}
+  ol.feed{position:relative;padding:4px 0 10px;margin-left:10px}
+  ol.feed::before{content:"";position:absolute;left:10px;top:16px;bottom:20px;width:1px;background:#cbd7df}
+  ol.feed>li{position:relative;padding:14px 10px 14px 42px;border-bottom:0;display:block}
+  ol.feed>li .icon{position:absolute;left:0;top:13px;width:22px;height:22px;line-height:21px;border-radius:50%;
+    color:#fff;background:#237d55;font-weight:800;z-index:1}
+  ol.feed>li .row .k{font-size:10.5px}
+  .approval,.question{margin:14px 0 14px 42px;border-width:1px;border-radius:5px;box-shadow:none}
+  .approved,.guard,.reply,details,.undo,.shot,pre.out{border-radius:5px}
+  .panels{padding:4px 0 24px;margin-left:42px}
+  .stats{padding:14px 0}
+  .count,.tk .badge{border-radius:4px}
+  .rail-tools{margin-top:auto}
+  @media (max-width:1180px){
+    .layout{grid-template-columns:280px minmax(480px,1fr)}
+    .utility-rail{position:static;height:auto;grid-column:1/-1;border-left:0;border-top:1px solid var(--line);
+      display:grid;grid-template-columns:repeat(3,1fr)}
+    .utility-rail .rail-heading{grid-column:1/-1}
+  }
+  @media (max-width:820px){
+    .layout{display:block}.queue-rail,.utility-rail{position:static;height:auto}
+    .incident-pane{padding:24px 18px}.inbox{max-height:320px}
+    .utility-rail{display:block}.chips{display:none}
+  }
 </style>
 </head>
 <body>
 
 <header>
-  <span class="mark">AIT</span>
-  <div class="brand">Technician console<span>Artificial IT · service desk</span></div>
+  <div class="brand-lockup">
+    <img class="brand-logo" src="/assets/momentum-logo-reversed.png" alt="Momentum">
+    <div class="product-name">Technician console<span>AIT service desk</span></div>
+  </div>
   <a class="portal-link" href="__PORTAL_URL__" target="_blank" rel="noopener">User portal ↗</a>
   <div class="chips" id="providerChips"><span class="chip">checking providers…</span></div>
 </header>
 
 <div class="layout">
-  <aside>
+  <aside class="queue-rail">
+    <div class="rail-heading"><div class="eyebrow">Service desk</div><h1>Ticket queue</h1></div>
     <section class="card">
       <h2>Inbox <span id="inboxCount" class="count"></span></h2>
       <div class="body" style="padding:0">
@@ -258,6 +333,25 @@
       </div>
     </section>
 
+  </aside>
+
+  <main class="incident-pane">
+    <section class="card stage" id="stage">
+      <div class="empty">
+        <img class="empty-logo" src="/assets/momentum-logo-positive.png" alt="Momentum">
+        <h3>Select a ticket to begin</h3>
+        <p>Choose a report from the queue, start an ad-hoc run, or use a prepared demonstration.</p>
+        <ul class="hints">
+          <li><b>Every step is gated.</b> A verdict is recorded before anything reaches the device.</li>
+          <li><b>Changes wait for you.</b> Nothing is applied until a technician approves it.</li>
+          <li><b>Questions go to the user.</b> Answers return here without another hand-off.</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <aside class="utility-rail">
+    <div class="rail-heading"><div class="eyebrow">Action centre</div><h1>Run &amp; review</h1></div>
     <section class="card">
       <h2>Work a ticket</h2>
       <div class="body">
@@ -301,7 +395,7 @@
       </div>
     </section>
 
-    <section class="card">
+    <section class="card rail-tools">
       <h2>What it has learned</h2>
       <div class="body">
         <div class="field">
@@ -323,23 +417,6 @@
       </div>
     </section>
   </aside>
-
-  <main>
-    <section class="card stage" id="stage">
-      <div class="empty">
-        <span class="mark" style="width:44px;height:44px;border-radius:12px;font-size:15px;
-          margin-bottom:16px;background:var(--accent-soft);color:var(--accent)">AIT</span>
-        <h3>Nothing running</h3>
-        <p>Type a ticket on the left, pick a prepared one, or wait for a report to
-           arrive from the user portal.</p>
-        <ul class="hints">
-          <li><b>Every step is gated.</b> A verdict is recorded before anything reaches the device.</li>
-          <li><b>You are asked, not told.</b> Changes stop here for sign-off, and stay undoable for 15 minutes.</li>
-          <li><b>Questions go to the user.</b> If AIT needs a detail, it appears on their page, not yours.</li>
-        </ul>
-      </div>
-    </section>
-  </main>
 </div>
 
 <script>

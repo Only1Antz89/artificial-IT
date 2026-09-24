@@ -11,12 +11,12 @@
     "ait": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && mkdir -p dist/src/server/console dist/src/server/portal dist/src/server/ui && cp src/server/console/index.html dist/src/server/console/index.html && cp src/server/portal/index.html dist/src/server/portal/index.html && cp src/server/ui/theme.css dist/src/server/ui/theme.css",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/src/server/console dist/src/server/portal dist/src/server/ui && cp src/server/console/index.html dist/src/server/console/index.html && cp src/server/portal/index.html dist/src/server/portal/index.html && cp src/server/ui/theme.css src/server/ui/momentum-logo-positive.png src/server/ui/momentum-logo-reversed.png src/server/ui/momentum-mark.png dist/src/server/ui/",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "doctor": "tsx src/cli.ts doctor",
     "demo": "tsx src/cli.ts demo",
     "demo:all": "tsx src/cli.ts demo --all",
-    "serve": "tsx src/server/index.ts",
+    "serve": "tsx src/cli.ts serve",
     "cli": "tsx src/cli.ts",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -128,24 +128,26 @@ function deskGate(session: RunSession, deskId: string) {
     async requestApproval(request: Parameters<typeof gate.requestApproval>[0]) {
       desk.update(deskId, (t) => {
         t.status = "waiting-on-technician";
-        t.updates.push({
-          at: new Date().toISOString(),
-          // What was found, not what will be run.
-          text: "We think we know what is wrong. A technician is checking before we change anything.",
-        });
       });
+      // A repair can contain several separately gated commands. The technician
+      // sees every approval, but the user only needs one milestone for the
+      // approval phase rather than the same sentence for every command.
+      desk.note(
+        deskId,
+        "We think we know what is wrong. A technician is checking the proposed fix before we change anything.",
+      );
 
       const outcome = await gate.requestApproval(request);
 
       desk.update(deskId, (t) => {
         t.status = "working";
-        t.updates.push({
-          at: new Date().toISOString(),
-          text: outcome.approved
-            ? "A technician has approved the fix — applying it now."
-            : "A technician would rather handle this one personally.",
-        });
       });
+      desk.note(
+        deskId,
+        outcome.approved
+          ? "A technician has approved the fix — applying it now."
+          : "A technician would rather handle this one personally.",
+      );
       return outcome;
     },
   };
@@ -457,6 +459,14 @@ export async function startServer(
   let consoleHtml = consoleTemplate.replaceAll("__PORTAL_URL__", "/portal");
   const portalHtml = readFileSync(join(here, "portal", "index.html"), "utf8");
   const themeCss = readFileSync(join(here, "ui", "theme.css"), "utf8");
+  const logoPositive = readFileSync(join(here, "ui", "momentum-logo-positive.png"));
+  const logoReversed = readFileSync(join(here, "ui", "momentum-logo-reversed.png"));
+  const logoMark = readFileSync(join(here, "ui", "momentum-mark.png"));
+  const brandAssets: Record<string, Buffer> = {
+    "/assets/momentum-logo-positive.png": logoPositive,
+    "/assets/momentum-logo-reversed.png": logoReversed,
+    "/assets/momentum-mark.png": logoMark,
+  };
 
   const handler = (surface: Surface) => async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -483,6 +493,15 @@ export async function startServer(
           "Cache-Control": "no-cache",
         });
         res.end(themeCss);
+        return;
+      }
+
+      if (req.method === "GET" && brandAssets[path]) {
+        res.writeHead(200, {
+          "Content-Type": "image/png",
+          "Cache-Control": "public, max-age=86400",
+        });
+        res.end(brandAssets[path]);
         return;
       }
 
