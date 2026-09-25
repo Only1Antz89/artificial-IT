@@ -47,6 +47,9 @@ export interface DeskTicket {
   /** The final reply, once the run has written one. */
   reply?: string;
   resolvedAt?: string;
+  /** Set by the portal kill switch and retained for the technician record. */
+  humanRequestedAt?: string;
+  humanRequestReason?: string;
 }
 
 /** What the portal is allowed to see. An allowlist, never a redaction. */
@@ -60,6 +63,7 @@ export interface UserFacingTicket {
   question?: { id: string; question: string };
   reply?: string;
   resolvedAt?: string;
+  humanRequested: boolean;
 }
 
 const STATUS_LABELS: Record<DeskStatus, string> = {
@@ -80,6 +84,7 @@ export function userView(ticket: DeskTicket): UserFacingTicket {
     status: ticket.status,
     statusLabel: STATUS_LABELS[ticket.status],
     updates: ticket.updates.map((u) => ({ ...u })),
+    humanRequested: Boolean(ticket.humanRequestedAt),
     ...(ticket.question
       ? { question: { id: ticket.question.id, question: ticket.question.question } }
       : {}),
@@ -217,12 +222,29 @@ export function userUpdateFor(event: { type: string; [k: string]: unknown }): st
   switch (event.type) {
     case "intake":
       return "We have read your report and understand what you are seeing.";
+    case "knowledge": {
+      const ticketIds = event["ticketIds"] as string[] | undefined;
+      return ticketIds?.length
+        ? "We checked similar support cases to help guide the investigation."
+        : "We checked our support history and are continuing with a fresh investigation.";
+    }
     case "diagnosis":
       return "We are checking a few things on your machine now.";
+    case "proposed":
+      return "We have prepared the next safe checks and are working through them now.";
     case "step": {
-      const result = event["result"] as { outcome: string; step: { mutating: boolean } };
+      const result = event["result"] as {
+        outcome: string;
+        step: { kind?: string; mutating: boolean };
+      };
       if (result.outcome === "success" && result.step.mutating) {
         return "We have made a change that should fix this, and are checking it worked.";
+      }
+      if (result.outcome === "success" && result.step.kind === "capture") {
+        return "We captured the current screen state to understand what you are seeing.";
+      }
+      if (result.outcome === "success" && !result.step.mutating) {
+        return "A read-only diagnostic check completed successfully.";
       }
       return undefined;
     }

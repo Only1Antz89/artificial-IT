@@ -61,6 +61,8 @@ export type StreamEvent =
   | { type: "approval-resolved"; id: string; approved: boolean; approver: string; reason: string }
   | { type: "question-asked"; question: PendingQuestion }
   | { type: "question-answered"; id: string; answer: string }
+  | { type: "question-cancelled"; id: string; reason: string }
+  | { type: "user-stop-requested"; at: string; requestedBy: "user"; reason: string }
   | { type: "error"; message: string }
   | { type: "done"; run: Run; internalNote: string; undoable: UndoableChange[] };
 
@@ -80,6 +82,8 @@ export class RunSession {
    */
   run?: Run;
   device?: DeviceSession;
+  userStopRequestedAt?: string;
+  userStopReason?: string;
   #closeTimer?: NodeJS.Timeout;
 
   #events: StreamEvent[] = [];
@@ -159,6 +163,47 @@ export class RunSession {
     this.#questions.delete(id);
     this.emit({ type: "question-answered", id, answer });
     entry.resolve(answer);
+    return true;
+  }
+
+  /**
+   * Honour the user's kill switch.
+   *
+   * Pending human waits are released immediately and the device channel is
+   * closed so no new action can start. The agent loop also checks this flag at
+   * every safe boundary and unwinds without writing a resolution.
+   */
+  requestUserStop(reason: string): boolean {
+    if (this.status !== "running" || this.userStopRequestedAt) return false;
+    this.userStopRequestedAt = new Date().toISOString();
+    this.userStopReason = reason;
+    this.emit({
+      type: "user-stop-requested",
+      at: this.userStopRequestedAt,
+      requestedBy: "user",
+      reason,
+    });
+
+    for (const [id, entry] of this.#pending) {
+      this.#pending.delete(id);
+      const outcome = {
+        approved: false,
+        approver: "user",
+        reason: "The user stopped automated work and requested a technician.",
+      };
+      this.emit({ type: "approval-resolved", id, ...outcome });
+      entry.resolve(outcome);
+    }
+    for (const [id, entry] of this.#questions) {
+      this.#questions.delete(id);
+      this.emit({
+        type: "question-cancelled",
+        id,
+        reason: "The user stopped automated work and requested a technician.",
+      });
+      entry.resolve(undefined);
+    }
+    void this.closeDevice();
     return true;
   }
 

@@ -850,15 +850,38 @@ function handle(ev, runId) {
       break;
     }
 
+    case "question-cancelled": {
+      const card = document.getElementById(`q-${ev.id}`);
+      if (card) {
+        card.classList.add("settled");
+        const out = card.querySelector(".outcome");
+        if (out) out.textContent = `Cancelled — ${ev.reason}`;
+        for (const control of card.querySelectorAll("input, button")) control.disabled = true;
+      }
+      break;
+    }
+
     case "approval-resolved": {
       const card = document.getElementById(`ap-${ev.id}`);
       if (card) {
         card.classList.add("settled");
+        for (const control of card.querySelectorAll("button")) control.disabled = true;
         const verdict = card.querySelector(".outcome");
         if (verdict) {
           verdict.textContent = `${ev.approved ? "Approved" : "Declined"} by ${ev.approver} — ${ev.reason}`;
         }
       }
+      break;
+    }
+
+    case "user-stop-requested": {
+      const pill = $("statusPill");
+      if (pill) {
+        pill.className = "status escalated";
+        pill.textContent = "human requested";
+      }
+      feedItem("■", "user stopped AI · human intervention requested",
+        esc(ev.reason), `Requested at ${esc(new Date(ev.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}`);
       break;
     }
 
@@ -1271,9 +1294,13 @@ function openTicket(ticket, manual = false) {
       <div><div class="t">${esc(ticket.summary)}</div>
       <div class="d">${esc(ticket.reference)} · reported by ${esc(ticket.reportedBy)} ·
         ${ticket.consentGranted ? "consented to checks on their machine" : "no consent given — no device work"}</div></div>
-      <span class="status running" id="statusPill">${esc(ticket.status)}</span>
+      <span class="status ${ticket.status === "escalated" ? "escalated" : "running"}" id="statusPill">${esc(ticket.status)}</span>
     </div>
     <div class="reply" style="margin:15px 17px">${esc(ticket.description)}</div>
+    ${ticket.humanRequestedAt ? `<div class="guard" style="margin:15px 17px">
+      <b>User stopped AI — human intervention requested</b>
+      ${esc(ticket.humanRequestReason ?? "The user requested a technician to take over.")}
+    </div>` : ""}
     <div id="hostbar"></div>
     <ol class="feed" id="feed"></ol>
     <div id="panels" class="panels"></div>`;

@@ -47,6 +47,18 @@
     transition:border-color var(--t-fast),background var(--t-fast)}
   input:hover,textarea:hover,select:hover{border-color:var(--line-strong)}
   textarea{resize:vertical;line-height:1.55;min-height:132px}
+  .voice-input{display:grid;grid-template-columns:minmax(0,1fr) 52px;gap:10px;align-items:stretch}
+  .voice-input textarea{min-width:0}
+  .voice-button{width:52px;min-height:132px;padding:0;border-radius:var(--radius-sm);
+    border:1px solid var(--brand-navy);background:var(--brand-navy);color:var(--brand-orange);
+    display:grid;place-items:center;cursor:pointer;transition:filter var(--t-fast),box-shadow var(--t-fast)}
+  .voice-button:hover{filter:brightness(1.08)}
+  .voice-button:focus-visible{outline:3px solid color-mix(in srgb,var(--brand-orange) 38%,transparent);outline-offset:2px}
+  .voice-button[aria-pressed="true"]{box-shadow:0 0 0 3px color-mix(in srgb,var(--brand-orange) 35%,transparent)}
+  .voice-button svg{width:22px;height:22px;display:block;overflow:visible}
+  .voice-button[aria-pressed="true"] svg{animation:voice-pulse 1s ease-in-out infinite}
+  @keyframes voice-pulse{50%{transform:scale(1.12);opacity:.72}}
+  @media (prefers-reduced-motion:reduce){.voice-button[aria-pressed="true"] svg{animation:none}}
   select{cursor:pointer}
   .field+.field{margin-top:20px}
   .two{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:20px}
@@ -166,7 +178,9 @@
   .journey-copy h2{font-size:18px;margin:2px 0 4px;color:var(--brand-navy)}
   .journey-copy p{font-size:14px;line-height:1.5;margin:0;color:var(--muted);max-width:35ch}
   .trust-note{margin-top:8px;padding-top:24px;border-top:1px solid var(--line);display:flex;gap:14px}
-  .trust-icon{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;flex:none;background:var(--ok-bg);color:var(--ok);font-weight:800}
+  .trust-note .trust-icon{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    flex:none;background:var(--ok-bg);color:var(--ok)}
+  .trust-note .trust-icon svg{display:block;width:16px;height:16px}
   .trust-note strong{display:block;color:var(--brand-navy);margin-bottom:3px}
   .trust-note span{display:block;font-size:13.5px;line-height:1.5;color:var(--muted)}
   .form-panel{min-width:0}
@@ -199,20 +213,45 @@
   .reply h3{font-size:16px;letter-spacing:0;text-transform:none;color:var(--brand-navy)}
   .steps{margin:28px 0 24px}
   .history{border-top:1px solid var(--line);padding-top:18px}
-  .history summary{cursor:pointer;font-weight:700;color:var(--brand-navy);list-style:none}
+  .history summary{cursor:pointer;font-weight:700;color:var(--brand-navy);list-style:none;
+    display:flex;align-items:center;justify-content:space-between;gap:16px}
   .history summary::-webkit-details-marker{display:none}
-  .history summary::after{content:"Show history  +";float:right;font-size:12px;color:var(--muted);font-weight:600}
-  .history[open] summary::after{content:"Hide history  −"}
+  .history-meta{display:flex;align-items:center;gap:14px;flex:none}
+  .history-toggle::after{content:"Show history  +";font-size:12px;color:var(--muted);font-weight:600}
+  .history[open] .history-toggle::after{content:"Hide history  −"}
+  .live-state{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;color:var(--muted);
+    font-weight:650;letter-spacing:.01em}
+  .live-state i{width:8px;height:8px;border-radius:50%;background:#98a6b5;display:block}
+  .live-state.live{color:var(--ok)}
+  .live-state.live i{background:var(--ok);box-shadow:0 0 0 4px color-mix(in srgb,var(--ok) 14%,transparent);
+    animation:live-pulse 1.5s ease-out infinite}
+  .live-state.reconnecting{color:var(--warn)}
+  .live-state.reconnecting i{background:var(--warn)}
+  @keyframes live-pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--ok) 28%,transparent)}70%,100%{box-shadow:0 0 0 7px transparent}}
+  @media(prefers-reduced-motion:reduce){.live-state.live i{animation:none}}
   .history ol{margin-top:22px}
+  .history ol li.latest{margin-left:-10px;padding:10px 10px 20px 36px;background:#f7fafc;border-radius:4px}
+  .history ol li.latest::before{left:13px;top:17px;background:var(--accent)}
+  .history ol li.latest::after{left:17px;top:30px}
+  .latest-label{display:inline-block;margin-left:8px;color:var(--brand-orange);font-size:10.5px;
+    font-weight:750;letter-spacing:.06em;text-transform:uppercase;vertical-align:1px}
   .request-summary{background:#f5f7f9;padding:24px;border-top:3px solid var(--brand-orange)}
   .request-summary h2{font-size:17px;color:var(--brand-navy);margin:0 0 16px}
   .request-summary dl{margin:0}
   .request-summary div{padding:12px 0;border-top:1px solid #dce3e8}
   .request-summary dt{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:3px}
   .request-summary dd{margin:0;font-size:14px;color:var(--ink-2)}
+  .kill-box{margin-top:20px;padding-top:18px;border-top:1px solid #dce3e8}
+  .kill-box p{margin:0 0 11px;font-size:13px;line-height:1.45;color:var(--muted)}
+  .kill-switch{width:100%;padding:13px 14px;border-radius:4px;border:1px solid #b42318;
+    background:#b42318;color:#fff;font-weight:750;cursor:pointer}
+  .kill-switch:hover:not(:disabled){background:#912018;border-color:#912018}
+  .kill-switch:focus-visible{outline:3px solid rgba(180,35,24,.24);outline-offset:2px}
+  .kill-switch:disabled{opacity:.66;cursor:progress}
+  .kill-error{margin-top:9px;color:#b42318;font-size:12.5px}
   .again{text-align:left;margin-top:20px}.again button{width:100%;border-radius:4px;color:var(--brand-navy);background:#fff}
   footer{margin:0;padding:22px 28px;border-top:1px solid var(--line);background:#f9fbfc}
-  @media(max-width:900px){
+  @media(max-width:1040px){
     #form{grid-template-columns:1fr;gap:32px;padding-top:38px}.intro{padding:0}
     .journey{grid-template-columns:repeat(3,1fr);gap:16px;margin-top:30px}.journey-step{display:block;padding:0}.journey-step::after{display:none}
     .journey-copy h2{font-size:15px}.journey-copy p{font-size:12.5px}.journey-number{width:34px;height:34px;margin-bottom:10px}
@@ -248,7 +287,7 @@
         <div class="journey-step"><span class="journey-number">2</span><div class="journey-copy"><h2>We check</h2><p>We’ll run read-only checks and diagnose the issue.</p></div></div>
         <div class="journey-step"><span class="journey-number">3</span><div class="journey-copy"><h2>You get an answer</h2><p>We’ll share what we found and what happens next.</p></div></div>
       </div>
-      <div class="trust-note"><span class="trust-icon">✓</span><div><strong>Your data is in safe hands</strong><span>Read-only checks happen automatically. Changes need a technician’s approval.</span></div></div>
+      <div class="trust-note"><span class="trust-icon" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none"><path d="m4.5 10.2 3.3 3.3 7.7-7.7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span><div><strong>Your data is in safe hands</strong><span>Read-only checks happen automatically. Changes need a technician’s approval.</span></div></div>
     </section>
 
     <section class="form-panel">
@@ -256,15 +295,20 @@
       <div class="field">
         <label for="desc">What’s the problem?</label>
         <p class="help">What you were doing, what happened, and roughly when it started.</p>
-        <textarea id="desc"
-          placeholder="The intranet page won't load — it just says the site can't be reached. It started this morning. Everything else seems fine, I can get to Google."></textarea>
+        <div class="voice-input">
+          <textarea id="desc"
+            placeholder="The intranet page won't load — it just says the site can't be reached. It started this morning. Everything else seems fine, I can get to Google."></textarea>
+          <button class="voice-button" id="voice" type="button" aria-label="Start voice input" aria-pressed="false" title="Start voice input">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="8" y="3" width="8" height="12" rx="4" stroke="currentColor" stroke-width="2"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </div>
         <div class="examples" id="examples"></div>
       </div>
 
       <div class="two">
         <div class="field">
           <label for="name">Your name</label>
-          <input id="name" placeholder="Priya Raman" autocomplete="name">
+          <input id="name" value="" autocomplete="off">
         </div>
         <div class="field">
           <label for="target">Which machine?</label>
@@ -305,11 +349,16 @@
       <div id="reply"></div>
       <div class="steps" id="steps"><div data-step="reported">Reported</div><div data-step="looking">Looking into it</div><div data-step="answer">Answer</div></div>
       <div id="working"></div><div id="ask"></div>
-      <details class="history" open><summary>Progress history</summary><ol class="timeline" id="timeline"></ol></details>
+      <details class="history" open><summary><span>Progress history</span><span class="history-meta"><span class="live-state" id="liveState" aria-live="polite"><i></i><span id="liveText">Connecting…</span></span><span class="history-toggle" aria-hidden="true"></span></span></summary><ol class="timeline" id="timeline"></ol></details>
     </section>
     <aside class="request-summary">
       <h2>Request summary</h2>
       <dl><div><dt>Reference</dt><dd id="summaryRef"></dd></div><div><dt>Status</dt><dd id="summaryStatus"></dd></div><div><dt>Issue</dt><dd class="summary" id="summary"></dd></div></dl>
+      <div class="kill-box" id="killBox" hidden>
+        <p>If the automated support is going in the wrong direction, stop it immediately and ask a technician to take over.</p>
+        <button class="kill-switch" id="stopAi" type="button">Stop AI and request a human</button>
+        <div class="kill-error" id="killError" role="alert"></div>
+      </div>
       <div class="again"><button id="another">Report something else</button></div>
     </aside>
   </div>
@@ -321,9 +370,98 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
   ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
-const time = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const time = (iso) => new Date(iso).toLocaleTimeString([], {
+  hour: "2-digit", minute: "2-digit", second: "2-digit",
+});
 
 let source = null;
+let activityMode = "connecting";
+let activityUpdatedAt = Date.now();
+
+function refreshActivityState() {
+  const state = $("liveState");
+  const label = $("liveText");
+  if (!state || !label) return;
+  state.className = `live-state ${activityMode}`;
+  if (activityMode === "live") {
+    const seconds = Math.floor((Date.now() - activityUpdatedAt) / 1000);
+    label.textContent = seconds < 2 ? "Live · just now" : `Live · ${seconds}s ago`;
+  } else if (activityMode === "complete") label.textContent = "Activity complete";
+  else if (activityMode === "handoff") label.textContent = "Handed to technician";
+  else if (activityMode === "reconnecting") label.textContent = "Reconnecting…";
+  else label.textContent = "Connecting…";
+}
+
+function setActivityState(mode) {
+  activityMode = mode;
+  if (mode === "live") activityUpdatedAt = Date.now();
+  refreshActivityState();
+}
+
+setInterval(refreshActivityState, 1000);
+
+/* ---------------- voice input ---------------- */
+
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const voiceButton = $("voice");
+let recognition = null;
+let voiceBase = "";
+let voiceActive = false;
+
+function setVoiceListening(listening) {
+  voiceActive = listening;
+  voiceButton.setAttribute("aria-pressed", String(listening));
+  voiceButton.setAttribute("aria-label", listening ? "Stop voice input" : "Start voice input");
+  voiceButton.title = listening ? "Stop voice input" : "Start voice input";
+}
+
+if (SpeechRecognition) {
+  recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = document.documentElement.lang || "en-GB";
+
+  recognition.addEventListener("start", () => {
+    voiceBase = $("desc").value.trim();
+    $("err").innerHTML = "";
+    setVoiceListening(true);
+  });
+  recognition.addEventListener("result", (event) => {
+    const spoken = Array.from(event.results)
+      .map((result) => result[0].transcript.trim())
+      .filter(Boolean)
+      .join(" ");
+    $("desc").value = [voiceBase, spoken].filter(Boolean).join(voiceBase ? " " : "");
+  });
+  recognition.addEventListener("end", () => setVoiceListening(false));
+  recognition.addEventListener("error", (event) => {
+    setVoiceListening(false);
+    if (event.error !== "aborted") {
+      $("err").innerHTML = `<div class="err">We couldn't hear that. Check microphone access and try again.</div>`;
+    }
+  });
+  voiceButton.addEventListener("click", () => {
+    if (voiceActive) {
+      recognition.abort();
+      setVoiceListening(false);
+      return;
+    }
+    setVoiceListening(true);
+    try {
+      recognition.start();
+    } catch {
+      setVoiceListening(false);
+    }
+  });
+} else {
+  voiceButton.addEventListener("click", () => {
+    $("err").innerHTML = `<div class="err">Voice input isn't available in this browser. You can still type your request.</div>`;
+  });
+}
+
+// Start every new report with a genuinely blank name field, including when a
+// browser tries to restore or autofill a value from an earlier visit.
+$("name").value = "";
 
 /* ---------------- openers ---------------- */
 
@@ -406,18 +544,48 @@ $("another").addEventListener("click", () => {
   if (source) { source.close(); source = null; }
   localStorage.removeItem("ait.reference");
   $("desc").value = "";
+  $("name").value = "";
   $("track").hidden = true;
   $("form").hidden = false;
   $("desc").focus();
+});
+
+$("stopAi").addEventListener("click", async () => {
+  const btn = $("stopAi");
+  const reference = $("ref").textContent.trim();
+  $("killError").textContent = "";
+  btn.disabled = true;
+  btn.textContent = "Stopping AI…";
+  try {
+    const response = await fetch(
+      `/api/portal/tickets/${encodeURIComponent(reference)}/stop`,
+      { method: "POST" },
+    );
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error ?? "We could not stop the automated work.");
+    show(data.ticket);
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = "Stop AI and request a human";
+    $("killError").textContent = err.message;
+  }
 });
 
 /* ---------------- tracking ---------------- */
 
 function watch(reference) {
   if (source) source.close();
+  setActivityState("connecting");
   source = new EventSource(`/api/portal/tickets/${encodeURIComponent(reference)}/events`);
+  source.onopen = () => setActivityState("live");
   source.onmessage = (e) => {
-    try { show(JSON.parse(e.data)); } catch { /* ignore a malformed frame */ }
+    try {
+      activityUpdatedAt = Date.now();
+      show(JSON.parse(e.data));
+    } catch { /* ignore a malformed frame */ }
+  };
+  source.onerror = () => {
+    if (!["complete", "handoff"].includes(activityMode)) setActivityState("reconnecting");
   };
 }
 
@@ -451,13 +619,24 @@ function show(ticket) {
     el.className = i < at ? "done" : i === at ? "on" : "";
   }
 
-  $("timeline").innerHTML = ticket.updates.map((u) =>
-    `<li class="enter">${esc(u.text)}<div class="t">${esc(time(u.at))}</div></li>`).join("");
+  $("timeline").innerHTML = ticket.updates.map((u, index) => {
+    const latest = index === ticket.updates.length - 1;
+    return `<li class="enter${latest ? " latest" : ""}">${esc(u.text)}${latest ? `<span class="latest-label">Latest</span>` : ""}<div class="t">${esc(time(u.at))}</div></li>`;
+  }).join("");
 
   // While it is still working, say so rather than leaving a static list that
   // looks like nothing is happening.
   const finished = ["resolved", "escalated", "failed"].includes(ticket.status);
   const resolved = ticket.status === "resolved";
+  if (ticket.humanRequested) setActivityState("handoff");
+  else if (finished) setActivityState("complete");
+  else if (source?.readyState === EventSource.OPEN) setActivityState("live");
+  $("killBox").hidden = finished || ticket.humanRequested;
+  if (!$("killBox").hidden) {
+    $("stopAi").disabled = false;
+    $("stopAi").textContent = "Stop AI and request a human";
+    $("killError").textContent = "";
+  }
   $("resolution").hidden = !resolved;
   $("working").innerHTML = finished || ticket.question
     ? ""

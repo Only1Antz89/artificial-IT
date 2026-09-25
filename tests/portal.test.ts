@@ -82,7 +82,7 @@ describe("the user's view is built by allowing, not by redacting", () => {
     // The allowlist is the whole mechanism: a technician-only field added to
     // DeskTicket later cannot leak here by being forgotten.
     expect(keys.sort()).toEqual(
-      ["reference", "status", "statusLabel", "submittedAt", "summary", "updates"].sort(),
+      ["humanRequested", "reference", "status", "statusLabel", "submittedAt", "summary", "updates"].sort(),
     );
     expect(JSON.stringify(view)).not.toContain("run-secret-id");
     expect(JSON.stringify(view)).not.toContain("simulated-windows-laptop");
@@ -103,11 +103,17 @@ describe("the user's view is built by allowing, not by redacting", () => {
     expect(update).not.toContain("net stop");
   });
 
-  it("has nothing to say about most steps", () => {
-    // A user does not want a running commentary of read-only checks.
-    expect(
-      userUpdateFor({ type: "step", result: { outcome: "success", step: { mutating: false } } }),
-    ).toBeUndefined();
+  it("turns real run events into safe live milestones", () => {
+    expect(userUpdateFor({ type: "knowledge", ticketIds: ["internal-id"] })).toMatch(
+      /similar support cases/i,
+    );
+    expect(userUpdateFor({ type: "proposed" })).toMatch(/next safe checks/i);
+    const check = userUpdateFor({
+      type: "step",
+      result: { outcome: "success", step: { kind: "command", mutating: false } },
+    });
+    expect(check).toMatch(/read-only diagnostic check/i);
+    expect(check).not.toMatch(/command|internal-id/i);
     expect(userUpdateFor({ type: "policy.evaluated" })).toBeUndefined();
   });
 
@@ -148,6 +154,7 @@ describe("reporting a problem", () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("IT Support");
+    expect(html).toContain("Live · just now");
     // The user's page must not carry the technician vocabulary at all.
     expect(html).not.toContain("guardrail");
     expect(html).not.toContain("audit");
@@ -234,6 +241,48 @@ describe("reporting a problem", () => {
     expect(res.status).toBe(404);
     expect(String(((await res.json()) as { error: string }).error)).toMatch(/cannot find/i);
   });
+
+  it("lets the user stop AI and records a human handover on the technician ticket", async () => {
+    const { body } = await submit({
+      description: "Nothing is printing, the jobs are stuck in the queue and I want this checked.",
+      reportedBy: "Morgan",
+      target: "simulated-windows-desktop",
+      consent: true,
+      provider: "offline",
+    });
+    const reference = (body["ticket"] as { reference: string }).reference;
+
+    await until(
+      reference,
+      (ticket) => ["working", "waiting-on-technician"].includes(String(ticket["status"])),
+      20_000,
+    );
+
+    const stopped = await fetch(`${base}/api/portal/tickets/${reference}/stop`, {
+      method: "POST",
+    });
+    expect(stopped.status).toBe(200);
+    const stoppedTicket = ((await stopped.json()) as { ticket: Record<string, unknown> }).ticket;
+    expect(stoppedTicket["status"]).toBe("escalated");
+    expect(stoppedTicket["humanRequested"]).toBe(true);
+    expect(String(stoppedTicket["reply"])).toMatch(/technician will take over/i);
+    expect(JSON.stringify(stoppedTicket["updates"])).toMatch(/stopped the automated work/i);
+
+    const technicianDesk = (await (await fetch(`${base}/api/desk`)).json()) as {
+      tickets: Record<string, unknown>[];
+    };
+    const technicianTicket = technicianDesk.tickets.find(
+      (ticket) => ticket["reference"] === reference,
+    )!;
+    expect(technicianTicket["status"]).toBe("escalated");
+    expect(technicianTicket["humanRequestedAt"]).toBeTruthy();
+    expect(String(technicianTicket["humanRequestReason"])).toMatch(/human intervention/i);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const after = await fetch(`${base}/api/portal/tickets/${reference}`);
+    const afterTicket = ((await after.json()) as { ticket: Record<string, unknown> }).ticket;
+    expect(afterTicket["status"]).toBe("escalated");
+  }, 30_000);
 });
 
 /* ------------------------------------------------------------------ *

@@ -21,7 +21,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runTicket } from "../agent/loop.js";
+import { runTicket, UserStopRequestedError } from "../agent/loop.js";
 import { selectBrainChecked, selectBrain, type ProviderName } from "../agent/select-brain.js";
 import { checkClaudeModel, checkGeminiModel, checkOpenAIModel, withTimeout } from "../agent/model-check.js";
 import { evaluate } from "../control-plane/policy/engine.js";
@@ -289,6 +289,10 @@ function deskGate(session: RunSession, deskId: string) {
 
       const outcome = await gate.requestApproval(request);
 
+      // The kill switch may have resolved this wait. Do not move the ticket
+      // back to "working" after the user has explicitly requested a handover.
+      if (session.userStopRequestedAt) return outcome;
+
       desk.update(deskId, (t) => {
         t.status = "working";
       });
@@ -430,6 +434,9 @@ function startRun(body: StartRunBody, workdir: string): RunSession {
       }
 
       if (device) {
+        // Attach the live channel while the run is active so the portal kill
+        // switch can close it immediately, not only after the run settles.
+        session.device = device;
         const caps = await device.capabilities();
         session.emit({
           type: "host",
@@ -465,6 +472,7 @@ function startRun(body: StartRunBody, workdir: string): RunSession {
           : { askUser: deskId ? deskQuestion(session, deskId) : session.ask() }),
         evidenceRoot: workdir,
         stepBudget: 10,
+        shouldStop: () => Boolean(session.userStopRequestedAt),
         onEvent: (event) => {
           session.emit(event);
           tellUser(userUpdateFor(event as unknown as { type: string }));
@@ -508,6 +516,9 @@ function startRun(body: StartRunBody, workdir: string): RunSession {
 
       if (deskId) {
         desk.update(deskId, (t) => {
+          // A user-requested handover wins over any model response that was
+          // already in flight when the kill switch was pressed.
+          if (t.humanRequestedAt) return;
           t.status = statusForRun(run);
           delete t.question;
           if (run.documentation?.user_reply) t.reply = run.documentation.user_reply;
@@ -515,6 +526,12 @@ function startRun(body: StartRunBody, workdir: string): RunSession {
         });
       }
     } catch (err) {
+      if (err instanceof UserStopRequestedError || session.userStopRequestedAt) {
+        await session.closeDevice();
+        device = undefined;
+        session.finish("finished");
+        return;
+      }
       session.emit({
         type: "error",
         message: err instanceof Error ? err.message : String(err),
@@ -788,6 +805,44 @@ export async function startServer(
         const session = registry.get(ticket.runId);
         const ok = session?.answer(ticket.question.id, answer) ?? false;
         json(res, ok ? 200 : 409, ok ? { ok: true } : { error: "That question has closed." });
+        return;
+      }
+
+      const portalStop = path.match(/^\/api\/portal\/tickets\/([^/]+)\/stop$/);
+      if (req.method === "POST" && portalStop) {
+        const ticket = desk.get(portalStop[1]!) ?? desk.byReference(portalStop[1]!);
+        if (!ticket) {
+          json(res, 404, { error: "We cannot find a report with that reference." });
+          return;
+        }
+        if (ticket.humanRequestedAt) {
+          json(res, 200, { ticket: userView(ticket) });
+          return;
+        }
+        if (["resolved", "escalated", "failed"].includes(ticket.status) || !ticket.runId) {
+          json(res, 409, { error: "Automated work is no longer running on this report." });
+          return;
+        }
+
+        const session = registry.get(ticket.runId);
+        const reason = "The user stopped the AI and requested human intervention.";
+        if (!session?.requestUserStop(reason)) {
+          json(res, 409, { error: "Automated work is no longer running on this report." });
+          return;
+        }
+
+        desk.update(ticket.id, (t) => {
+          t.status = "escalated";
+          t.humanRequestedAt = session.userStopRequestedAt;
+          t.humanRequestReason = reason;
+          delete t.question;
+          t.reply = "You stopped the automated work. A technician will take over from here.";
+          t.updates.push({
+            at: session.userStopRequestedAt!,
+            text: "You stopped the automated work. No further AI actions will run, and a technician has been asked to take over.",
+          });
+        });
+        json(res, 200, { ticket: userView(desk.get(ticket.id)!) });
         return;
       }
 
@@ -1311,7 +1366,9 @@ function streamEvents(res: ServerResponse, runId: string, lastEventId?: number):
     // leaked a socket and a keep-alive interval for as long as the process
     // lived, and a browser that had navigated away would never learn to stop.
     const type = (event as { type?: string }).type;
-    if (type === "done" || type === "error") setImmediate(finish);
+    if (type === "done" || type === "error" || type === "user-stop-requested") {
+      setImmediate(finish);
+    }
   });
 
   // The run may already have finished before this subscriber arrived, in which

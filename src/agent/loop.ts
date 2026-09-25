@@ -58,8 +58,18 @@ export interface RunOptions {
   askUser?: (question: string, step: PlanStep) => Promise<string | undefined>;
   /** Called after each meaningful event, for the console and the CLI. */
   onEvent?: (event: RunEvent) => void;
+  /** True once the person who raised the ticket has stopped automated work. */
+  shouldStop?: () => boolean;
   /** Write a knowledge entry when the run settles. Default true. */
   learn?: boolean;
+}
+
+/** A deliberate user stop is a handover, not an agent failure. */
+export class UserStopRequestedError extends Error {
+  constructor() {
+    super("The user stopped automated work and requested a technician.");
+    this.name = "UserStopRequestedError";
+  }
 }
 
 export type RunEvent =
@@ -85,8 +95,13 @@ export async function runTicket(options: RunOptions): Promise<Run> {
     userAnswers,
     askUser,
     onEvent,
+    shouldStop,
     learn = true,
   } = options;
+
+  const assertAutomationMayContinue = () => {
+    if (shouldStop?.()) throw new UserStopRequestedError();
+  };
 
   const run_id = newId("run");
   const trace_id = newId("trace");
@@ -100,6 +115,7 @@ export async function runTicket(options: RunOptions): Promise<Run> {
   // Probe the machine once, up front. Everything downstream reasons about what
   // this host actually has rather than what its platform usually has.
   const capabilities = session ? await session.capabilities() : undefined;
+  assertAutomationMayContinue();
 
   audit.record("run.started", "system", `Run started for ticket ${ticket.id}.`, {
     brain: brain.name,
@@ -121,6 +137,7 @@ export async function runTicket(options: RunOptions): Promise<Run> {
 
   // ---- 1. Understand the request ------------------------------------------
   const intake = await brain.intake({ ticket });
+  assertAutomationMayContinue();
   audit.record("intake.completed", "agent", intake.summary, {
     category: intake.category,
     out_of_scope: intake.out_of_scope,
@@ -161,6 +178,7 @@ export async function runTicket(options: RunOptions): Promise<Run> {
     priorTickets,
     ...(capabilities ? { capabilities } : {}),
   });
+  assertAutomationMayContinue();
   audit.record(
     "diagnosis.formed",
     "agent",
@@ -198,6 +216,7 @@ export async function runTicket(options: RunOptions): Promise<Run> {
   }
 
   while (!resolved && !wantsHuman && executed < stepBudget) {
+    assertAutomationMayContinue();
     const proposal = await brain.propose({
       ticket: userSaid.length
         ? {
@@ -226,6 +245,7 @@ export async function runTicket(options: RunOptions): Promise<Run> {
       ...(capabilities ? { capabilities } : {}),
       canAskUser: Boolean(askUser),
     });
+    assertAutomationMayContinue();
 
     if (proposal.root_cause) rootCause = proposal.root_cause;
 
@@ -260,6 +280,7 @@ export async function runTicket(options: RunOptions): Promise<Run> {
 
     for (const step of proposal.steps) {
       if (executed >= stepBudget) break;
+      assertAutomationMayContinue();
 
       // --- The gate. Every step, no exceptions. ---
       const verdict = evaluate(step, {
@@ -328,6 +349,7 @@ export async function runTicket(options: RunOptions): Promise<Run> {
           verdict,
           justification: proposal.reasoning,
         });
+        assertAutomationMayContinue();
         audit.record(
           outcome.approved ? "approval.granted" : "approval.denied",
           "human",
@@ -355,6 +377,7 @@ export async function runTicket(options: RunOptions): Promise<Run> {
             step: step.id,
           });
           const answer = await askUser(question, step);
+          assertAutomationMayContinue();
           if (answer !== undefined && answer.trim() !== "") {
             answers = { ...(answers ?? {}), [question]: answer };
             // Kept on the run so the write-up and the ticket carry what the
@@ -372,6 +395,7 @@ export async function runTicket(options: RunOptions): Promise<Run> {
         evidence,
         ...(answers ? { userAnswers: answers } : {}),
       });
+      assertAutomationMayContinue();
       results.push(result);
       executed += 1;
 
@@ -420,6 +444,7 @@ export async function runTicket(options: RunOptions): Promise<Run> {
   }
 
   const budgetExhausted = executed >= stepBudget && !resolved;
+  assertAutomationMayContinue();
 
   // ---- 5. Decide on escalation --------------------------------------------
   const escalation = assessEscalation({
@@ -461,6 +486,7 @@ export async function runTicket(options: RunOptions): Promise<Run> {
     escalated: escalation.triggered,
     ...(capabilities ? { capabilities } : {}),
   });
+  assertAutomationMayContinue();
   audit.record("run.finished", "agent", documentation.title, {
     resolved,
     escalated: escalation.triggered,
