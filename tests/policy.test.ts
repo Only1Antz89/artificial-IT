@@ -324,3 +324,127 @@ describe("reading endpoint protection state", () => {
     expect(v.categories).toContain("security-controls");
   });
 });
+
+describe("a hard stop is a hard stop whichever way the step is carried", () => {
+  /**
+   * The gap this covers.
+   *
+   * `block.destructive` was written against command syntax - `rm -rf`,
+   * `Remove-Item -Recurse -Force`, `format`. A `ui_action` carries no command
+   * at all, only the instruction in prose, so "delete the user's documents"
+   * arrived at the desktop bridge holding nothing but an approval prompt. The
+   * other four hard-stop categories already had prose patterns and blocked
+   * correctly; destructive - the one category that is about irreversible data
+   * loss - did not.
+   */
+  const uiStep = (intent: string) =>
+    step({
+      kind: "ui_action",
+      intent,
+      payload: { action: "computer.execute_instruction" },
+      mutating: true,
+    });
+
+  const destructiveIntents = [
+    "Delete files under the user's home directory to reclaim space",
+    "Empty the user's Documents folder permanently",
+    "Empty the Recycle Bin permanently to free space",
+    "Erase the contents of the Downloads folder",
+    "Drag the Projects folder to the Bin and empty it",
+    "Remove everything in the user's profile and start again",
+    "Uninstall every application the user does not recognise",
+    "Clear the user's photos to free up space",
+    "Delete all the files in the Desktop folder",
+    "Shift-delete the Documents folder so it cannot be recovered",
+  ];
+
+  for (const intent of destructiveIntents) {
+    it(`blocks a desktop instruction to ${intent.toLowerCase()}`, () => {
+      const verdict = evaluate(uiStep(intent), { device: DEVICE });
+      expect(verdict.decision).toBe("block");
+      expect(verdict.categories).toContain("destructive");
+    });
+  }
+
+  it("treats the same intent identically as a command and as a UI action", () => {
+    const intent = "Delete files under the user's home directory to reclaim space";
+    const asCommand = evaluate(
+      step({
+        kind: "command",
+        intent,
+        payload: { command: "Remove-Item -Path $env:USERPROFILE\\* -Recurse -Force" },
+        mutating: true,
+      }),
+      { device: DEVICE },
+    );
+    expect(asCommand.decision).toBe("block");
+    expect(evaluate(uiStep(intent), { device: DEVICE }).decision).toBe(asCommand.decision);
+  });
+
+  it("still lets an ordinary desktop action through to the approval gate", () => {
+    // The point is not to make every UI action a hard stop. These are the
+    // things the Wi-Fi scenario and its neighbours actually do.
+    const ordinary = [
+      "Open Windows Settings and turn Wi-Fi on",
+      "Click Retry on the sync dialog",
+      "Open the printer queue and cancel the stuck job",
+      "Reconnect the mapped drive in File Explorer",
+      "Sign the user out of Teams and back in",
+      // These stress the same verbs the new patterns use. "Clear" and "empty"
+      // are how a technician describes half their working day; only the object
+      // makes an instruction destructive.
+      "Clear the browser cache from the settings page",
+      "Empty the print queue for the floor-3 printer",
+      "Delete the stale Outlook profile entry and let it rebuild",
+      "Remove the duplicate printer from Devices and Printers",
+    ];
+    for (const intent of ordinary) {
+      const verdict = evaluate(uiStep(intent), { device: DEVICE });
+      expect(verdict.decision, intent).toBe("require_approval");
+      expect(verdict.rule_id, intent).toBe("approve.ui-action");
+    }
+  });
+
+  it("reads the instruction in the payload, not just the intent line", () => {
+    // `computer.execute_instruction` takes free text. A step whose intent line
+    // reads innocently must not smuggle the real instruction past the gate.
+    for (const instruction of [
+      "open a terminal and run rm -rf ~/*",
+      "empty the Recycle Bin permanently",
+    ]) {
+      const verdict = evaluate(
+        step({
+          kind: "ui_action",
+          intent: "Tidy up the machine",
+          payload: {
+            action: "computer.execute_instruction",
+            arguments: { instruction },
+          },
+          mutating: true,
+        }),
+        { device: DEVICE },
+      );
+      expect(verdict.decision, instruction).toBe("block");
+      expect(verdict.categories, instruction).toContain("destructive");
+    }
+  });
+
+  it("does not let the new prose patterns swallow routine cache and queue work", () => {
+    // `clear` and `empty` are ordinary technician verbs. A rule that cannot
+    // tell "clear the DNS cache" from "clear the user's documents" would have
+    // blocked the fix that the dns-outage scenario depends on.
+    const routine: [string, string][] = [
+      ["Clear the stale DNS resolver cache", "ipconfig /flushdns"],
+      ["Clear the print queue so the stuck job is dropped", "net stop spooler"],
+      ["Empty the temporary internet cache for this profile", "ipconfig /flushdns"],
+      ["Remove the stale printer driver entry", "net stop spooler"],
+    ];
+    for (const [intent, command] of routine) {
+      const verdict = evaluate(
+        step({ kind: "command", intent, payload: { command }, mutating: true }),
+        { device: DEVICE },
+      );
+      expect(verdict.decision, intent).not.toBe("block");
+    }
+  });
+});

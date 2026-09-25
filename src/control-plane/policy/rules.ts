@@ -155,6 +155,30 @@ export const BLOCKING_RULES: GuardrailRule[] = [
       /\bfind\b[^\n]*\s-delete\b/i,
       /\bfind\b[^\n]*\s-exec(dir)?\s+(rm|mv|shred|dd|truncate)\b/i,
       /\bxargs\b[^\n]*\b(rm|shred)\b/i,
+
+      // Prose, not syntax.
+      //
+      // Every pattern above describes a *command*. A `ui_action` carries no
+      // command - it carries an instruction for a person's desktop in plain
+      // English - so "delete the user's documents" used to arrive at the
+      // bridge holding nothing but an approval prompt, while the identical
+      // intent attached to `rm -rf ~/*` was a hard stop. The other hard-stop
+      // categories already read prose; this one did not, and it is the
+      // category that is about data you cannot get back.
+      //
+      // Deliberately narrow on the object. "Clear the DNS cache" and "empty
+      // the print queue" are ordinary technician work and must stay out.
+      /\b(delete|deleting|remove|removing|erase|erasing|empty|emptying|clear|clearing|wipe|wiping|purge|purging|trash|bin)\b[^\n]{0,45}\b(home\s+(directory|folder)|documents\s+folder|downloads\s+folder|desktop\s+folder|user'?s?\s+(files|documents|folders?|profile|data|photos)|entire\s+(folder|directory|drive|profile|disk|volume)|everything\s+(in|on|under)|all\s+(of\s+)?(the\s+)?(files|documents|folders|data))\b/i,
+      // "…and make sure it cannot be recovered" is the whole risk in a word.
+      /\b(permanently|irreversibly|unrecoverabl|beyond\s+recovery|for\s+good)\b[^\n]{0,40}\b(delete|remove|erase|empty|wipe)\b/i,
+      /\b(delete|remove|erase|empty|wipe)\b[^\n]{0,45}\b(permanently|irreversibly|unrecoverabl|beyond\s+recovery|for\s+good)\b/i,
+      // Emptying the bin is the step that turns a recoverable delete into an
+      // unrecoverable one, in either word order.
+      /\b(empty|emptying)\b[^\n]{0,25}\b(recycle\s*bin|wastebasket|trash|the\s+bin)\b/i,
+      /\b(recycle\s*bin|wastebasket|trash|the\s+bin)\b[^\n]{0,30}\b(empty|emptied|emptying)\b/i,
+      // Bulk uninstall: not a deletion of files, but just as hard to undo for
+      // the person whose machine it is.
+      /\b(uninstall|remove|delete)\b[^\n]{0,25}\b(every|all)\b[^\n]{0,25}\b(app|apps|application|applications|program|programs|software)\b/i,
     ],
     reason:
       "This would destroy data or a filesystem irreversibly. Automated remediation never performs unrecoverable deletions.",

@@ -149,6 +149,41 @@ describe("escalation triggers", () => {
     expect(e.route_to).toBe("security-operations");
   });
 
+  it("does not call an approval-gated run one with no safe action", () => {
+    // A run paused at the approval gate has a safe action ready - it is
+    // waiting for a signature. Reporting `no-safe-action` beside
+    // `requires-authority` puts two contradictory sentences in the same
+    // handover: "a change is ready to go" and "there is nothing to do".
+    const e = assessEscalation({
+      ticket: ticket({}),
+      intake,
+      diagnosis: {
+        hypotheses: [],
+        leading_index: 0,
+        confidence: "medium",
+        root_cause: "The Wi-Fi interface is disabled in Windows Settings.",
+      },
+      results: [
+        result({
+          outcome: "awaiting_approval",
+          verdict: {
+            decision: "require_approval",
+            categories: ["routine"],
+            reason: "Driving the desktop is confirmed with a technician first.",
+            rule_id: "approve.ui-action",
+            escalate: false,
+          },
+        }),
+      ],
+      budgetExhausted: false,
+      resolved: false,
+      wantsHuman: true,
+    });
+    expect(e.triggers).toContain("requires-authority");
+    expect(e.triggers).not.toContain("no-safe-action");
+    expect(e.ask).toMatch(/authorise/i);
+  });
+
   it("says the cause is known when it is, rather than asking for fresh eyes", () => {
     const e = assessEscalation({
       ticket: ticket({}),

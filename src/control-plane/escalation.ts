@@ -111,7 +111,14 @@ export function assessEscalation(input: EscalationInput): Escalation {
   if (input.wantsHuman && !resolved) {
     const established =
       Boolean(diagnosis?.root_cause) && diagnosis?.confidence !== "low";
-    triggers.add(established ? "no-safe-action" : "low-confidence");
+    // ...unless the run is standing at the approval gate. There the safe
+    // action exists and is written down; it is waiting for a signature. Saying
+    // "no safe action exists" beside "a change is ready to go but needs a
+    // technician to authorise it" puts two contradictory sentences in the same
+    // handover, and the technician has to work out which one to believe.
+    if (!triggers.has("requires-authority")) {
+      triggers.add(established ? "no-safe-action" : "low-confidence");
+    }
   }
 
   // Someone who cannot work, or a VIP, should not sit in a queue behind a bot.

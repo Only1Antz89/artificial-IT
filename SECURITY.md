@@ -97,6 +97,18 @@ These are real, and stated plainly rather than left for someone to discover:
     matches `/home/user/.env`, because `/` and `.` are both non-word characters
     and there is no boundary between them. Anything dot-prefixed needs matching
     without a leading `\b`.
+  - **A rule written for one step kind, and a new step kind that carries the
+    same risk in a different shape.** `block.destructive` was written entirely
+    against command syntax — `rm -rf`, `Remove-Item -Recurse -Force`, `format`.
+    When `ui_action` arrived, it carried no command at all: an instruction for
+    a person's desktop, in plain English. "Delete the user's documents" reached
+    the approval gate as an ordinary UI action, while the identical intent
+    attached to `rm -rf ~/*` was a hard stop. The other four hard-stop
+    categories already read prose and blocked correctly; the one about data you
+    cannot get back did not. Whenever a new step kind is added, every blocking
+    rule has to be re-read against the shape that step kind actually carries —
+    a rule is not a rule until it fires on all of them. `tests/policy.test.ts`
+    now asserts the two shapes get the same verdict for the same intent.
 
 - **A refusal freezes changes, not the whole run.** After a hard block the loop
   keeps working the ticket read-only. This is deliberate — a technician told
