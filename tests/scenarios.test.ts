@@ -98,15 +98,24 @@ describe("the targets a user can pick", () => {
   it("can build a session for every target it offers", () => {
     // A target in the picker with no session behind it is an option that
     // throws the moment someone chooses it during a demo.
+    // Targets that depend on something outside this process - the host, a
+    // MeshCentral server, the demo stack - are offered only when that thing is
+    // configured, and the server filters them out when it is not. What must
+    // never happen is a target in the picker that has no session behind it.
+    const environmentDependent = new Set([
+      "this-machine",
+      "remote-device",
+      "simulated-host-over-the-wire",
+    ]);
     for (const t of AD_HOC_TARGETS) {
-      if (t.key === "this-machine" || t.key === "remote-device") continue;
+      if (environmentDependent.has(t.key)) continue;
       expect(() => sessionForTarget(t.key), t.key).not.toThrow();
     }
   });
 
   it("names a real hostname in every simulated target's note", () => {
     for (const t of AD_HOC_TARGETS.filter((x) => x.key.startsWith("simulated-"))) {
-      expect(t.note, t.key).toMatch(/[A-Z]{3}-[A-Z]{2}-\d{4}/);
+      expect(t.note, t.key).toMatch(/[A-Z]{3}-[A-Z]{2,4}-\d{4}/);
     }
   });
 });

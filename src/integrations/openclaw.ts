@@ -20,12 +20,42 @@ export const OPENCLAW_ENV = {
   masterTokenFallback: "MASTER_AGENT_RUNTIME_SYNC_TOKEN",
   /** Optional request timeout in milliseconds (250-30000, default 5000). */
   timeoutMs: "OPENCLAW_BRIDGE_TIMEOUT_MS",
+  /** Optional path dialect: `ait`, `aillium`, or unset to discover it. */
+  dialect: "OPENCLAW_BRIDGE_DIALECT",
 } as const;
 
-export const OPENCLAW_DESKTOP_PATHS = {
-  capabilities: "/api/desktop/capabilities",
-  invokeAction: "/api/desktop/invoke-action",
+/**
+ * The two path shapes a governed gateway is served under.
+ *
+ * `ait` is the boundary this client was written against. `aillium` is what the
+ * gateway in the alternative project actually mounts - the bodies are the same,
+ * only the prefix differs, so forking the client over it would be silly.
+ *
+ * Which one a deployment uses is a property of that deployment, not of the
+ * protocol, so the client discovers it rather than being told.
+ */
+export const OPENCLAW_DESKTOP_DIALECTS = {
+  ait: {
+    capabilities: "/api/desktop/capabilities",
+    invokeAction: "/api/desktop/invoke-action",
+  },
+  aillium: {
+    capabilities: "/api/aillium/desktop/capabilities",
+    invokeAction: "/api/aillium/desktop/invoke-action",
+  },
 } as const;
+
+export type OpenClawDialect = keyof typeof OPENCLAW_DESKTOP_DIALECTS;
+
+/** Dialects to try, in order, when none is pinned. */
+export const OPENCLAW_DIALECT_ORDER: readonly OpenClawDialect[] = ["ait", "aillium"];
+
+export function isOpenClawDialect(value: unknown): value is OpenClawDialect {
+  return value === "ait" || value === "aillium";
+}
+
+/** Retained under its original name: the default dialect's paths. */
+export const OPENCLAW_DESKTOP_PATHS = OPENCLAW_DESKTOP_DIALECTS.ait;
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 const MIN_TIMEOUT_MS = 250;
@@ -35,6 +65,11 @@ export interface OpenClawConfig {
   baseUrl: string;
   runtimeToken: string;
   timeoutMs?: number;
+  /**
+   * Pin the gateway's path dialect. Left unset, the client discovers it with a
+   * read-only capabilities probe and then holds it for the rest of its life.
+   */
+  dialect?: OpenClawDialect;
 }
 
 export type OpenClawConfigurationStatus =
@@ -230,12 +265,18 @@ export function inspectOpenClawConfiguration(
   if (!runtimeToken) missing.push("runtimeToken");
   if (missing.length > 0) return { state: "unconfigured", missing };
 
+  // An unrecognised dialect is left unset rather than rejected: discovery will
+  // find the right one, and a typo in an optional hint should not take the
+  // whole integration offline.
+  const dialectHint = env[OPENCLAW_ENV.dialect]?.trim().toLowerCase();
+
   return {
     state: "configured",
     config: {
       baseUrl: normaliseBaseUrl(baseUrl!),
       runtimeToken: runtimeToken!,
       timeoutMs: parseTimeout(env[OPENCLAW_ENV.timeoutMs]),
+      ...(isOpenClawDialect(dialectHint) ? { dialect: dialectHint } : {}),
     },
     missing: [],
   };
@@ -278,12 +319,17 @@ function parseCapabilities(value: unknown): DesktopCapabilities {
     );
   }
 
-  const surfaces = Array.isArray(record.surfaces)
+  const declaredSurfaces = Array.isArray(record.surfaces)
     ? record.surfaces.filter(isDesktopSurface)
     : [];
+  // The gateway reports `operators`; the desktop bridge underneath it reports
+  // the single `activeOperator` it is currently set to. Both are the same fact
+  // at different altitudes, and a technician wants to see it either way.
   const operators = Array.isArray(record.operators)
     ? record.operators.filter((item): item is string => typeof item === "string")
-    : [];
+    : nonBlank(record.activeOperator)
+      ? [record.activeOperator]
+      : [];
   const capabilities = Array.isArray(record.capabilities)
     ? record.capabilities.flatMap((item): DesktopCapability[] => {
         const candidate = asRecord(item);
@@ -302,6 +348,12 @@ function parseCapabilities(value: unknown): DesktopCapabilities {
         }];
       })
     : [];
+
+  // A bridge that lists its capabilities has told you its surfaces whether or
+  // not it also named them, so derive rather than report none.
+  const surfaces = declaredSurfaces.length > 0
+    ? declaredSurfaces
+    : [...new Set(capabilities.map((item) => item.surface))];
 
   return {
     available: record.available,
@@ -415,6 +467,17 @@ export class OpenClawDesktopClient {
   readonly #runtimeToken: string;
   readonly #timeoutMs: number;
   readonly #fetch: typeof fetch;
+  /**
+   * The dialect this gateway answers on, once known.
+   *
+   * Discovery is deliberately confined to `capabilities`, which is read-only
+   * and idempotent. An action is never replayed against a second path: a
+   * gateway that accepted the request and then failed downstream may well have
+   * already moved the user's mouse, and "try the other URL" would move it
+   * twice. So `invokeAction` resolves the dialect first, with a probe, and only
+   * then posts - once.
+   */
+  #dialect: OpenClawDialect | undefined;
 
   constructor(config: OpenClawConfig, options: ClientOptions = {}) {
     if (!nonBlank(config.runtimeToken)) {
@@ -429,6 +492,12 @@ export class OpenClawDesktopClient {
       ? DEFAULT_TIMEOUT_MS
       : parseTimeout(String(config.timeoutMs));
     this.#fetch = options.fetchImpl ?? fetch;
+    this.#dialect = config.dialect;
+  }
+
+  /** The dialect in use, or undefined until one has been discovered. */
+  get dialect(): OpenClawDialect | undefined {
+    return this.#dialect;
   }
 
   async #post(path: string, body: Record<string, unknown>): Promise<unknown> {
@@ -478,9 +547,33 @@ export class OpenClawDesktopClient {
   }
 
   async capabilities(includeRuntimeHints = false): Promise<DesktopCapabilities> {
-    return parseCapabilities(await this.#post(OPENCLAW_DESKTOP_PATHS.capabilities, {
-      includeRuntimeHints,
-    }));
+    const body = { includeRuntimeHints };
+
+    if (this.#dialect) {
+      return parseCapabilities(
+        await this.#post(OPENCLAW_DESKTOP_DIALECTS[this.#dialect].capabilities, body),
+      );
+    }
+
+    // Discovery. Only a 404 means "wrong path here" - a 401 is a bad token on
+    // the right gateway and a 5xx is a gateway in trouble, and trying the other
+    // prefix would turn either into a misleading "not configured".
+    let lastError: unknown;
+    for (const dialect of OPENCLAW_DIALECT_ORDER) {
+      try {
+        const parsed = parseCapabilities(
+          await this.#post(OPENCLAW_DESKTOP_DIALECTS[dialect].capabilities, body),
+        );
+        this.#dialect = dialect;
+        return parsed;
+      } catch (err) {
+        lastError = err;
+        const notFound =
+          err instanceof OpenClawIntegrationError && err.status === 404;
+        if (!notFound) throw err;
+      }
+    }
+    throw lastError;
   }
 
   async invokeAction(input: InvokeDesktopActionInput): Promise<Record<string, unknown>> {
@@ -512,10 +605,10 @@ export class OpenClawDesktopClient {
       ...(input.arguments ? { arguments: input.arguments } : {}),
       ...(input.metadata ? { metadata: input.metadata } : {}),
     };
-    const result = await this.#post(
-      OPENCLAW_DESKTOP_PATHS.invokeAction,
-      payload,
-    );
+    // Resolve the dialect before acting, never by retrying the action itself.
+    if (!this.#dialect) await this.capabilities();
+    const paths = OPENCLAW_DESKTOP_DIALECTS[this.#dialect ?? "ait"];
+    const result = await this.#post(paths.invokeAction, payload);
     const record = asRecord(result);
     if (!record) {
       throw new OpenClawIntegrationError(

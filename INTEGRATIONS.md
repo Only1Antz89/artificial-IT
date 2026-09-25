@@ -68,6 +68,27 @@ without claiming a real device is attached:
 5. retain the provider receipt as JSON evidence; and
 6. re-run `netsh` and resolve only after it reports `Connected`.
 
+## Running it as a stack
+
+`npm run demo:stack` stands the middle two rows of that table up as real
+services on a Docker network: an OpenClaw desktop gateway and a UI-TARS Desktop
+RPC bridge, both speaking their real contracts over real sockets, against a
+simulated desktop. The terminal and the desktop input are two channels onto one
+host, so an approved action is verifiable through the shell exactly as it would
+be on an endpoint carrying both agents.
+
+`DEMO_STACK.md` has the architecture and the honest inventory of what is real
+in it. The short version: the transport, the route contracts, the credential
+split and the authority *shape* checking are real; the signature verification
+and the desktop are not, and both say so in their own responses.
+
+AIT talks to whichever gateway is deployed. The alternative project serves its
+desktop routes under `/api/aillium/desktop/*` while this client was written
+against `/api/desktop/*`; the bodies are identical, so the client discovers the
+prefix with a read-only probe and then holds it. `OPENCLAW_BRIDGE_DIALECT`
+pins it when you already know. An action is never replayed against a second
+path.
+
 ## Live configuration
 
 ### MeshCentral

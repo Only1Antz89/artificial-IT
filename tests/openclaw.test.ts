@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   inspectOpenClawConfiguration,
+  openClawConfigFromEnv,
   OpenClawDesktopClient,
   OpenClawIntegrationError,
   probeOpenClawIntegration,
@@ -138,7 +139,11 @@ describe("OpenClaw desktop bridge", () => {
       observation: "The target received the click",
     }));
     const client = new OpenClawDesktopClient(
-      { baseUrl: "https://openclaw.example.com", runtimeToken: "runtime-secret" },
+      {
+        baseUrl: "https://openclaw.example.com",
+        runtimeToken: "runtime-secret",
+        dialect: "ait",
+      },
       { fetchImpl: fetchMock },
     );
     const input = Object.assign(governedAction(), {
@@ -245,5 +250,171 @@ describe("OpenClaw readiness", () => {
       message: "OpenClaw request could not be completed",
     });
     expect(readiness.message).not.toContain("runtime-secret");
+  });
+});
+
+describe("talking to whichever gateway is actually deployed", () => {
+  /**
+   * The gateway in the alternative project mounts its desktop routes under
+   * `/api/aillium/desktop/*`; this client was written against
+   * `/api/desktop/*`. The bodies are identical, so the difference is a
+   * deployment detail rather than a protocol one, and the client discovers it.
+   */
+  const notFound = () =>
+    new Response(JSON.stringify({ error: "Not Found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  function clientWith(handler: (url: string) => Response, dialect?: "ait" | "aillium") {
+    const fetchMock = vi.fn<typeof fetch>(async (input) => handler(String(input)));
+    const client = new OpenClawDesktopClient(
+      {
+        baseUrl: "http://localhost:18789",
+        runtimeToken: "runtime-secret",
+        ...(dialect ? { dialect } : {}),
+      },
+      { fetchImpl: fetchMock },
+    );
+    return { client, fetchMock };
+  }
+
+  it("falls through to the aillium prefix when the ait one is not there", async () => {
+    const { client, fetchMock } = clientWith((url) =>
+      url.endsWith("/api/aillium/desktop/capabilities")
+        ? jsonResponse(capabilityPayload())
+        : notFound(),
+    );
+
+    await expect(client.capabilities()).resolves.toMatchObject({ rpcReady: true });
+    expect(client.dialect).toBe("aillium");
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      "http://localhost:18789/api/desktop/capabilities",
+      "http://localhost:18789/api/aillium/desktop/capabilities",
+    ]);
+  });
+
+  it("remembers the dialect instead of probing again", async () => {
+    const { client, fetchMock } = clientWith((url) =>
+      url.endsWith("/api/aillium/desktop/capabilities")
+        ? jsonResponse(capabilityPayload())
+        : notFound(),
+    );
+
+    await client.capabilities();
+    await client.capabilities();
+    expect(fetchMock.mock.calls.map(([url]) => String(url)).slice(2)).toEqual([
+      "http://localhost:18789/api/aillium/desktop/capabilities",
+    ]);
+  });
+
+  it("sends an action to the discovered prefix, and sends it once", async () => {
+    // The important half of this test is the count. A gateway that accepted a
+    // request and then failed downstream may already have moved the user's
+    // mouse; retrying the same action against a second URL would move it
+    // twice. Discovery is confined to the read-only probe for that reason.
+    const { client, fetchMock } = clientWith((url) => {
+      if (url.endsWith("/api/aillium/desktop/capabilities")) {
+        return jsonResponse(capabilityPayload());
+      }
+      if (url.endsWith("/api/aillium/desktop/invoke-action")) {
+        return jsonResponse({ ok: true, observation: "done" });
+      }
+      return notFound();
+    });
+
+    await expect(client.invokeAction(governedAction())).resolves.toMatchObject({
+      ok: true,
+    });
+    const actionCalls = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.includes("invoke-action"));
+    expect(actionCalls).toEqual([
+      "http://localhost:18789/api/aillium/desktop/invoke-action",
+    ]);
+  });
+
+  it("never replays an action after a non-404 failure", async () => {
+    const { client, fetchMock } = clientWith((url) =>
+      url.includes("capabilities")
+        ? jsonResponse(capabilityPayload())
+        : new Response("{}", { status: 500 }),
+    );
+
+    await expect(client.invokeAction(governedAction())).rejects.toThrow();
+    expect(
+      fetchMock.mock.calls.map(([url]) => String(url)).filter((u) => u.includes("invoke-action")),
+    ).toHaveLength(1);
+  });
+
+  it("does not mistake a bad token for the wrong path", async () => {
+    // 401 on the first prefix means this is the right gateway and the token is
+    // wrong. Trying the other prefix would report "unconfigured" for what is
+    // actually an authentication problem.
+    const { client, fetchMock } = clientWith(() => new Response("{}", { status: 401 }));
+
+    await expect(client.capabilities()).rejects.toMatchObject({ status: 401 });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("honours a pinned dialect without probing for it", async () => {
+    const { client, fetchMock } = clientWith(
+      () => jsonResponse(capabilityPayload()),
+      "aillium",
+    );
+
+    await client.capabilities();
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      "http://localhost:18789/api/aillium/desktop/capabilities",
+    ]);
+  });
+
+  it("reads the dialect hint from the environment, and ignores a typo", () => {
+    const base = {
+      OPENCLAW_BRIDGE_URL: "http://127.0.0.1:18789",
+      OPENCLAW_BRIDGE_RUNTIME_TOKEN: "t",
+    };
+    expect(
+      openClawConfigFromEnv({ ...base, OPENCLAW_BRIDGE_DIALECT: "aillium" })?.dialect,
+    ).toBe("aillium");
+    expect(
+      openClawConfigFromEnv({ ...base, OPENCLAW_BRIDGE_DIALECT: "AIT" })?.dialect,
+    ).toBe("ait");
+    expect(
+      openClawConfigFromEnv({ ...base, OPENCLAW_BRIDGE_DIALECT: "nonsense" })?.dialect,
+    ).toBeUndefined();
+  });
+});
+
+describe("reading a capabilities payload the bridge itself produced", () => {
+  it("accepts the desktop bridge's own shape, not just the gateway's", async () => {
+    // What `buildCapabilitiesPayload()` in the UI-TARS desktop bridge returns:
+    // one `activeOperator` rather than a list, and no `surfaces` or `note`.
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      jsonResponse({
+        available: true,
+        rpcReady: true,
+        provider: "ui-tars-desktop",
+        launchUrl: null,
+        activeOperator: "nutjs",
+        capabilities: [
+          {
+            action: "computer.execute_instruction",
+            surface: "local_computer",
+            category: "computer",
+            description: "Run a natural-language instruction on the desktop.",
+          },
+        ],
+      }),
+    );
+    const client = new OpenClawDesktopClient(
+      { baseUrl: "http://localhost:47891", runtimeToken: "t", dialect: "ait" },
+      { fetchImpl: fetchMock },
+    );
+
+    const capabilities = await client.capabilities();
+    expect(capabilities.operators).toEqual(["nutjs"]);
+    // Surfaces are derived from the capabilities rather than reported as none.
+    expect(capabilities.surfaces).toEqual(["local_computer"]);
   });
 });

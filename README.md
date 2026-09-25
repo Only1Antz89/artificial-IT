@@ -84,6 +84,20 @@ and mobile posture through the same read-only policy gate, retains raw evidence,
 and can open an ordinary proactive ticket for any finding; remediation then
 follows the same approval and escalation flow as a user-raised ticket.
 
+## The demo stack
+
+`npm run demo:stack` brings the whole thing up as three containers talking to
+each other over real HTTP: AIT, an OpenClaw desktop gateway, and a UI-TARS
+Desktop RPC bridge with a shell onto the same simulated host. Every boundary is
+real - two separate credentials, real 401s and 404s and timeouts, a gateway
+that refuses an action before it reaches a desktop - against a desktop that is
+simulated and says so in every response it sends.
+
+That is what promotes the Operations card from `SIMULATED` to `LIVE`: something
+answered. See **[DEMO_STACK.md](DEMO_STACK.md)** for the architecture, the
+credential split, what is real and what is not, and how to swap a simulated
+service for the real one.
+
 ## Running against your own machine
 
 Everything else is simulated so it behaves the same everywhere. These two are
@@ -129,6 +143,8 @@ rectangle.
 | Approved desktop actions with verification | `src/execution-plane/device.ts`, `src/integrations/openclaw-session.ts` |
 | Governed OpenClaw → UI-TARS bridge client | `src/integrations/openclaw.ts` |
 | Periodic endpoint, service and mobile health pulse | `src/pulse/` |
+| The containerised demo stack | `src/sim/`, `docker-compose.demo.yml`, `DEMO_STACK.md` |
+| Where desktop authority comes from | `src/demo/desktop-authority.ts` |
 
 ## The guardrails
 

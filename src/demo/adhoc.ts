@@ -15,6 +15,7 @@ import { hostname } from "node:os";
 import { newId, nowIso, type Severity, type Ticket } from "../contracts/index.js";
 import { LOCAL_TICKET_TAG } from "../agent/heuristic-brain.js";
 import { localDevice, hostPlatform } from "./local.js";
+import { BRIDGE_DEVICE, bridgeTargetAvailable } from "./bridge-device.js";
 import {
   WIN_LAPTOP,
   WIN_DESKTOP,
@@ -35,6 +36,7 @@ export type AdHocTarget =
   | "simulated-mac-laptop"
   | "simulated-mac-designer"
   | "simulated-windows-field-laptop"
+  | "simulated-host-over-the-wire"
   | "simulated-windows-wifi-disabled"
   | "no-device";
 
@@ -100,6 +102,11 @@ export const AD_HOC_TARGETS: { key: AdHocTarget; label: string; note: string }[]
     note: "LON-LT-2604, ready for an approved desktop-control action.",
   },
   {
+    key: "simulated-host-over-the-wire",
+    label: "Simulated host over the demo stack",
+    note: "SIM-DESK-0001, reached over HTTP: terminal and approved desktop input on one host.",
+  },
+  {
     key: "no-device",
     label: "No device attached",
     note: "A request with nothing to run against - access requests, questions.",
@@ -124,6 +131,8 @@ function deviceFor(target: AdHocTarget): DeviceInfo | undefined {
       return WIN_FIELD;
     case "simulated-windows-wifi-disabled":
       return WIN_WIFI_LAPTOP;
+    case "simulated-host-over-the-wire":
+      return BRIDGE_DEVICE;
     case "no-device":
       return undefined;
   }

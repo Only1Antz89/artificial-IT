@@ -1,0 +1,125 @@
+name: ait-demo
+
+# The stakeholder demo, as a stack.
+#
+# Three containers on one network:
+#
+#   desktop-bridge  a UI-TARS Desktop RPC bridge, speaking the real contract
+#                   against a simulated Windows desktop
+#   openclaw        an OpenClaw desktop gateway, speaking the real contract,
+#                   forwarding to that bridge
+#   ait             the demo itself: console, user portal, pulse, guardrails
+#
+# What this buys over the in-process simulation AIT ships with: every boundary
+# is real. Real sockets, two separate credentials, real 401s and 404s and
+# timeouts, and a gateway that can refuse an action before it reaches a
+# desktop. Those are the failure modes that show up in front of an audience,
+# and none of them can happen to a function call.
+#
+# What it is NOT: a real desktop. No screen is driven, no endpoint is enrolled,
+# no MDM tenant is connected. Every service says so in its own responses, and
+# the console's Operations card reads them rather than assuming.
+#
+#   cp .env.demo.example .env
+#   docker compose -f docker-compose.demo.yml up --build
+#
+# Then open http://localhost:3110 (technician) and :3111 (user portal).
+
+services:
+  desktop-bridge:
+    build:
+      context: .
+    image: ait-demo
+    command: ["node", "dist/src/sim/main.js", "bridge"]
+    environment:
+      AILLIUM_DESKTOP_BRIDGE_TOKEN: "${AILLIUM_DESKTOP_BRIDGE_TOKEN:?set a bridge token in .env}"
+      AILLIUM_DESKTOP_BRIDGE_PORT: "47891"
+    # Not published to the host. Only the gateway may reach the bridge, which
+    # is the same containment the real deployment relies on.
+    expose:
+      - "47891"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - |
+          fetch('http://127.0.0.1:47891/capabilities',{method:'POST',
+            headers:{'Content-Type':'application/json',
+            Authorization:'Bearer '+process.env.AILLIUM_DESKTOP_BRIDGE_TOKEN},
+            body:'{}'}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+    restart: unless-stopped
+
+  openclaw:
+    build:
+      context: .
+    image: ait-demo
+    command: ["node", "dist/src/sim/main.js", "gateway"]
+    depends_on:
+      desktop-bridge:
+        condition: service_healthy
+    environment:
+      OPENCLAW_BRIDGE_RUNTIME_TOKEN: "${OPENCLAW_BRIDGE_RUNTIME_TOKEN:?set a gateway token in .env}"
+      OPENCLAW_GATEWAY_PORT: "18789"
+      AILLIUM_DESKTOP_BRIDGE_URL: "http://desktop-bridge:47891"
+      # A separate credential on purpose: holding the gateway's token must not
+      # get you the bridge's.
+      AILLIUM_DESKTOP_BRIDGE_TOKEN: "${AILLIUM_DESKTOP_BRIDGE_TOKEN:?set a bridge token in .env}"
+    ports:
+      - "${OPENCLAW_PORT:-18789}:18789"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - |
+          fetch('http://127.0.0.1:18789/api/desktop/capabilities',{method:'POST',
+            headers:{'Content-Type':'application/json',
+            Authorization:'Bearer '+process.env.OPENCLAW_BRIDGE_RUNTIME_TOKEN},
+            body:'{}'}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+    restart: unless-stopped
+
+  ait:
+    build:
+      context: .
+    image: ait-demo
+    command: ["node", "dist/src/cli.js", "serve", "--port", "3110"]
+    depends_on:
+      openclaw:
+        condition: service_healthy
+    environment:
+      SIM_BIND_HOST: "0.0.0.0"
+      OPENCLAW_BRIDGE_URL: "http://openclaw:18789"
+      OPENCLAW_BRIDGE_RUNTIME_TOKEN: "${OPENCLAW_BRIDGE_RUNTIME_TOKEN:?set a gateway token in .env}"
+      # Optional. Without either key the offline playbook engine runs, which is
+      # what makes the stack demonstrable with no credentials at all.
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      AIT_PROVIDER: "${AIT_PROVIDER:-}"
+      # Optional live endpoint. Left unset, MeshCentral reads UNAVAILABLE in
+      # the Operations card rather than being quietly simulated.
+      MESHCENTRAL_URL: "${MESHCENTRAL_URL:-}"
+      MESHCENTRAL_TOKEN: "${MESHCENTRAL_TOKEN:-}"
+      MESHCENTRAL_MESH_ID: "${MESHCENTRAL_MESH_ID:-}"
+      MESHCENTRAL_DEVICE_ID: "${MESHCENTRAL_DEVICE_ID:-}"
+      # Optional live help desk. Left unset, the in-memory queue is used.
+      ZENDESK_SUBDOMAIN: "${ZENDESK_SUBDOMAIN:-}"
+      ZENDESK_EMAIL: "${ZENDESK_EMAIL:-}"
+      ZENDESK_API_TOKEN: "${ZENDESK_API_TOKEN:-}"
+    ports:
+      - "${AIT_CONSOLE_PORT:-3110}:3110"
+      - "${AIT_PORTAL_PORT:-3111}:3111"
+    volumes:
+      - evidence:/app/run-artifacts
+    restart: unless-stopped
+
+volumes:
+  evidence:

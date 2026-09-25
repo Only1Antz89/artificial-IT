@@ -25,7 +25,11 @@
     "providers": "tsx src/cli.ts providers",
     "reset": "tsx src/cli.ts reset",
     "queue": "tsx src/cli.ts queue",
-    "ticket": "tsx src/cli.ts ticket"
+    "ticket": "tsx src/cli.ts ticket",
+    "sim:bridge": "tsx src/sim/main.ts bridge",
+    "sim:gateway": "tsx src/sim/main.ts gateway",
+    "demo:stack": "docker compose -f docker-compose.demo.yml up --build",
+    "demo:stack:down": "docker compose -f docker-compose.demo.yml down -v"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",

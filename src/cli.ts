@@ -26,7 +26,7 @@ import { runTicket } from "./agent/loop.js";
 import { selectBrainChecked } from "./agent/select-brain.js";
 import { PolicyBoundGate } from "./control-plane/approvals.js";
 import { KnowledgeStore } from "./knowledge/index.js";
-import { sessionForTarget } from "./demo/sessions.js";
+import { governedSessionForTarget } from "./demo/sessions.js";
 import { selectBrain } from "./agent/select-brain.js";
 import { runDoctor, type CheckState } from "./doctor.js";
 import * as nodeFs from "node:fs";
@@ -310,7 +310,7 @@ async function cmdTicket(args: string[]): Promise<void> {
   const ticket = adHocTicket({ description, target });
   const selection = await selectBrainChecked(provider);
 
-  const session = sessionForTarget(target);
+  const session = await governedSessionForTarget(target);
 
   console.log(`\n${c.bold("AIT")} ${c.dim(`— ${selection.provider} (${selection.model}) · ${target}`)}`);
   console.log(`${c.dim("ticket:")} ${ticket.subject}\n`);

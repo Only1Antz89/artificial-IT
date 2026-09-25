@@ -30,6 +30,7 @@ import { SCENARIOS, TICKETS, USERS, DEVICE_FIELDS } from "../demo/scenarios.js";
 import { LOCAL_SCENARIOS } from "../demo/run-local.js";
 import { localDangerTicket, localHealthTicket, localSession, hostPlatform } from "../demo/local.js";
 import { remoteTargetAvailable } from "../demo/adhoc.js";
+import { bridgeTargetAvailable } from "../demo/bridge-device.js";
 import {
   AD_HOC_TARGETS,
   adHocTicket,
@@ -37,7 +38,7 @@ import {
   localTargetAvailable,
   type AdHocRequest,
 } from "../demo/adhoc.js";
-import { sessionForTarget } from "../demo/sessions.js";
+import { governedSessionForTarget } from "../demo/sessions.js";
 import {
   InMemoryZendeskClient,
   publicReplyFor,
@@ -312,9 +313,17 @@ function deskQuestion(session: RunSession, deskId: string) {
   };
 }
 
-/** Open a session against whichever machine an ad-hoc ticket names. */
-function adHocSession(target: AdHocRequest["target"]): DeviceSession | undefined {
-  return sessionForTarget(target);
+/**
+ * Open a session against whichever machine an ad-hoc ticket names.
+ *
+ * Governed rather than plain: when a desktop bridge and an authority issuer
+ * are both configured, a device that can be driven is driven through them
+ * instead of through the in-process simulation.
+ */
+function adHocSession(
+  target: AdHocRequest["target"],
+): Promise<DeviceSession | undefined> {
+  return governedSessionForTarget(target);
 }
 
 /**
@@ -364,7 +373,7 @@ function startRun(body: StartRunBody, workdir: string): RunSession {
         // Typed on the spot. Nothing is matched or pre-arranged - it goes to
         // whichever brain is configured, exactly as a fixture ticket would.
         ticket = adHocTicket(body.ticket);
-        device = adHocSession(body.ticket.target);
+        device = await adHocSession(body.ticket.target);
       } else if (local) {
         if (hostPlatform() === "unknown") {
           throw new Error(`No diagnostic set for platform "${process.platform}".`);
@@ -553,6 +562,7 @@ function availableTargets(): typeof AD_HOC_TARGETS {
   return AD_HOC_TARGETS.filter((t) => {
     if (t.key === "this-machine") return localTargetAvailable();
     if (t.key === "remote-device") return remoteTargetAvailable();
+    if (t.key === "simulated-host-over-the-wire") return bridgeTargetAvailable();
     return true;
   });
 }
