@@ -11,7 +11,7 @@
     "ait": "./dist/src/cli.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && mkdir -p dist/src/server/console dist/src/server/portal dist/src/server/ui && cp src/server/console/index.html dist/src/server/console/index.html && cp src/server/portal/index.html dist/src/server/portal/index.html && cp src/server/ui/theme.css src/server/ui/momentum-logo-positive.png src/server/ui/momentum-logo-reversed.png src/server/ui/momentum-mark.png dist/src/server/ui/",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/src/server/console dist/src/server/portal dist/src/server/settings dist/src/server/ui && cp src/server/console/index.html dist/src/server/console/index.html && cp src/server/portal/index.html dist/src/server/portal/index.html && cp src/server/settings/index.html dist/src/server/settings/index.html && cp src/server/ui/theme.css src/server/ui/momentum-logo-positive.png src/server/ui/momentum-logo-reversed.png src/server/ui/momentum-mark.png dist/src/server/ui/",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "doctor": "tsx src/cli.ts doctor",
     "demo": "tsx src/cli.ts demo",
@@ -33,7 +33,9 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",
+    "@google/genai": "^2.24.0",
     "openai": "^7.10.0",
+    "ws": "^8.21.3",
     "zod": "^4.0.0"
   },
   "devDependencies": {
@@ -42,7 +44,6 @@
     "playwright-core": "^1.63.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0",
-    "ws": "^8.18.0"
+    "vitest": "^3.0.0"
   }
 }

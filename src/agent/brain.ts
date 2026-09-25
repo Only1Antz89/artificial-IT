@@ -7,9 +7,11 @@
  * be trustworthy: the brain can propose anything at all, and the loop is what
  * decides whether it happens.
  *
- * Two implementations ship:
+ * Four implementations ship:
  *
  *   - `ClaudeBrain`    - Claude Opus 5, structured outputs, real judgement.
+ *   - `OpenAIBrain`    - OpenAI Responses API with strict structured outputs.
+ *   - `GeminiBrain`    - Google Gemini API with JSON Schema outputs.
  *   - `HeuristicBrain` - a deterministic rule-based stand-in so the demo, the
  *                        tests and CI run with no API key and no network.
  *

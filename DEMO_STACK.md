@@ -1,7 +1,7 @@
 # The demo stack
 
-One command stands up the stakeholder demo as three containers that talk to
-each other over real HTTP:
+One command stands up the stakeholder demo as five containers that talk over
+real HTTP and WebSocket relays:
 
 ```bash
 cp .env.demo.example .env      # set the two tokens
@@ -10,36 +10,50 @@ npm run demo:stack             # docker compose up --build
 
 - **Technician console** → http://localhost:3110
 - **User portal** → http://localhost:3111
+- **MeshCentral lab** → https://localhost:20443
+
+The console's **Options & settings** page can attach an Anthropic, OpenAI or
+Gemini key to the running AIT container for live model-backed reasoning. Keys entered in
+the browser are runtime-only and are cleared when that container is recreated;
+use environment variables or Docker secrets when persistence is required.
 
 Stop it with `npm run demo:stack:down`.
+
+The browser verifier uses those same defaults. If you remap either host port,
+set `AIT_DEMO_URL` and `AIT_DEMO_PORTAL_URL` before running
+`npm run verify:demo`.
 
 ## What is in it
 
 ```text
   ┌──────────────┐  ticket, diagnosis, guardrails, approvals, pulse
   │     ait      │
-  └──────┬───────┘
-         │  terminal channel            │  approved desktop action
-         │  POST /exec                  │  POST /api/desktop/invoke-action
-         │  bridge token                │  gateway token
-         │                              ▼
-         │                      ┌───────────────┐
-         │                      │   openclaw    │  checks the governed
-         │                      └───────┬───────┘  authority, then forwards
-         │                              │  POST /invoke
-         │                              │  bridge token
-         ▼                              ▼
-  ┌────────────────────────────────────────────┐
-  │             desktop-bridge                 │  one host, one state
-  │   UI-TARS Desktop RPC contract + a shell   │
-  └────────────────────────────────────────────┘
+  └──┬────────┬──┘
+     │        │ approved desktop action
+     │        │ gateway token
+     │        ▼
+     │  ┌───────────────┐
+     │  │   openclaw    │  checks the governed authority, then forwards
+     │  └───────┬───────┘
+     │          │ bridge token
+     │          ▼
+     │  ┌────────────────────────────────────────────┐
+     │  │             desktop-bridge                 │
+     │  │   UI-TARS Desktop RPC contract + a shell   │
+     │  └────────────────────────────────────────────┘
+     │
+     │ live MeshCentral control + terminal relay
+     ▼
+  ┌───────────────┐       enrolled agent       ┌─────────────────┐
+  │  meshcentral  │◀──────────────────────────▶│  mesh-endpoint  │
+  └───────────────┘                            └─────────────────┘
 ```
 
-The bridge is the *machine*. Its terminal and its desktop input are two
-channels onto one state, which is the arrangement a real endpoint has when it
-carries both a MeshCentral agent and UI-TARS Desktop. That is what makes the
-demo's verification step mean something: the fix goes in through the governed
-desktop path and is read back through the shell.
+The desktop bridge is the stateful *simulated graphical machine*: the fix goes
+in through the governed desktop path and is read back through its separate
+shell. Alongside it, the MeshCentral endpoint is a real agent and terminal
+relay on an isolated Linux container. The two demonstrations stay visibly
+distinct so a simulated click is never presented as control of a real desktop.
 
 Two separate credentials, on purpose. AIT presents one to the gateway; the
 gateway presents another to the bridge. Holding either must not get you the
@@ -68,7 +82,7 @@ file being read:
 | Transport | HTTP, both tokens, both path dialects, status codes, timeouts | — |
 | OpenClaw gateway | route contract, authority **shape** validation, refusal before forwarding | signature verification: nothing signs the token |
 | UI-TARS bridge | RPC contract, capability descriptors, action receipts | the desktop: no screen is driven, no input is injected |
-| MeshCentral | the adapter, tested against a protocol-faithful server | unset by default, so it reads `UNAVAILABLE` |
+| MeshCentral | official server, login-token auth, control channel, relay and a real enrolled Linux agent | the target is a disposable container, not a person's workstation |
 | MDM / mobile | — | entirely: there is no MDM connector yet |
 
 The bridge reports its provider as `simulated-ui-tars-desktop`, never
@@ -134,6 +148,10 @@ request and then failed downstream may already have moved the user's mouse.
 Plain `http://` is accepted only for a loopback gateway. Anything else must be
 HTTPS.
 
+The Compose stack makes one narrow exception: it opts into HTTP for the
+single-label `openclaw` service name on its private Docker network. The flag
+does not permit dotted remote hosts, which continue to require HTTPS.
+
 ## What is still missing for a genuinely live demo
 
 The code path is complete; these are deployment dependencies, not gaps in the
@@ -143,7 +161,7 @@ repository:
    key to the issuer, public key to UI-TARS Desktop.
 2. UI-TARS Desktop installed on a Mac, with Screen Recording and Accessibility
    granted.
-3. A MeshCentral server with a demonstration Windows device enrolled.
+3. A real user workstation enrolled in MeshCentral; the included endpoint is a disposable Linux lab container.
 4. An MDM connector — Intune, Jamf or similar. Until one exists, the mobile
    third of AIT Pulse stays simulated and is labelled as such.
 

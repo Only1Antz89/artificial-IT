@@ -162,6 +162,16 @@
   details > div{padding:0 14px 13px}
   pre.block{background:var(--code-bg); color:var(--code-ink); border-radius:9px; padding:12px;
     font-size:11.5px; overflow:auto; max-height:340px; margin:0; white-space:pre-wrap}
+  .note-markdown{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--brand-orange);
+    border-radius:9px;padding:15px 17px;max-height:420px;overflow:auto;font-size:12.5px;line-height:1.55}
+  .note-markdown h1,.note-markdown h2,.note-markdown h3{color:var(--ink);text-transform:none;letter-spacing:normal}
+  .note-markdown h1{font-size:18px;margin:0 0 14px}.note-markdown h2{font-size:14px;margin:18px 0 7px}
+  .note-markdown h3{font-size:12.5px;margin:15px 0 6px}.note-markdown p{margin:5px 0}
+  .note-markdown ul{margin:5px 0 10px;padding-left:20px}.note-markdown li{margin:3px 0}
+  .note-markdown code{background:var(--code-bg);color:var(--code-ink);border-radius:5px;padding:1px 5px;font-size:11.5px}
+  .note-markdown strong{font-weight:750}.note-markdown em{color:var(--muted)}
+  .note-markdown u{text-decoration-color:var(--brand-orange);text-decoration-thickness:2px;text-underline-offset:3px}
+  .note-markdown .md-orange{color:var(--brand-orange);font-weight:800}
   .stats{display:flex; gap:22px; flex-wrap:wrap; padding:14px 17px; border-bottom:1px solid var(--line)}
   .stat b{display:block; font-size:19px; line-height:1.2}
   .stat span{font-size:11.5px; color:var(--muted)}
@@ -216,29 +226,6 @@
     border:1px solid rgba(255,255,255,.28);padding:6px 12px;border-radius:999px}
   .portal-link:hover{border-color:var(--brand-orange);background:rgba(255,255,255,.06)}
   .empty-logo{display:block;width:138px;height:auto;margin:0 auto 20px}
-
-  /* integration readiness + proactive pulse */
-  .ops-list{display:grid;gap:9px}
-  .ops-row{display:grid;grid-template-columns:1fr auto;gap:3px 8px;align-items:center}
-  .ops-row .name{font-size:12.5px;font-weight:650;color:var(--ink)}
-  .ops-row .detail{grid-column:1/-1;font-size:11.5px;line-height:1.4;color:var(--muted)}
-  .ops-state{font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;font-weight:750;
-    padding:2px 7px;border-radius:999px;border:1px solid var(--line)}
-  .ops-state.live{color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)}
-  .ops-state.configured{color:var(--accent);background:var(--accent-soft);border-color:var(--accent-line)}
-  .ops-state.simulated{color:var(--warn);background:var(--warn-bg);border-color:var(--warn-line)}
-  .ops-state.unavailable{color:var(--muted);background:var(--panel-2)}
-  .ops-state.critical{color:var(--stop);background:var(--stop-bg);border-color:var(--stop-line)}
-  .ops-divider{height:1px;background:var(--line);margin:13px 0}
-  .ops-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:10px}
-  .ops-actions button{padding:7px 8px;font-size:11.5px}
-  .pulse-head{display:flex;justify-content:space-between;gap:8px;align-items:center}
-  .pulse-head b{font-size:12.5px}.pulse-head span{font-size:11px;color:var(--muted)}
-  .pulse-summary{font-size:11.5px;color:var(--muted);margin-top:5px}
-  .pulse-target{border-top:1px dashed var(--line);padding-top:8px;margin-top:8px}
-  .pulse-target .top{display:flex;gap:6px;align-items:center;justify-content:space-between;font-size:11.5px}
-  .pulse-target .finding{font-size:11px;color:var(--muted);margin-top:2px;line-height:1.35}
-  .pulse-target button{width:auto;padding:4px 7px;font-size:10.5px;margin-top:5px}
 
   @media (max-width:640px){
     header{padding:12px 16px;gap:11px}
@@ -339,6 +326,7 @@
     <img class="brand-logo" src="/assets/momentum-logo-reversed.png" alt="Momentum">
     <div class="product-name">Technician console<span>AIT service desk</span></div>
   </div>
+  <a class="portal-link" href="/settings">Options &amp; settings</a>
   <a class="portal-link" href="__PORTAL_URL__" target="_blank" rel="noopener">User portal ↗</a>
   <div class="chips" id="providerChips"><span class="chip">checking providers…</span></div>
 </header>
@@ -355,23 +343,14 @@
         </div>
       </div>
     </section>
-
-    <section class="card" id="operationsCard">
-      <h2>Operations</h2>
-      <div class="body">
-        <div id="integrationList" class="ops-list"><div class="hint">Reading adapter state…</div></div>
-        <button class="ghost" id="probeIntegrations" style="width:100%;margin-top:10px">Probe configured bridges</button>
-        <div class="ops-divider"></div>
-        <div class="pulse-head"><b>Proactive pulse</b><span id="pulseMode">stopped</span></div>
-        <div id="pulseSummary" class="pulse-summary">No health pulse has run yet.</div>
-        <div class="ops-actions">
-          <button class="ghost" id="runPulse">Run now</button>
-          <button class="ghost" id="togglePulse">Start 30s</button>
+    <section class="card">
+      <h2>Demo tickets <span id="demoQueueCount" class="count"></span></h2>
+      <div class="body" style="padding:0">
+        <div id="demoQueue" class="inbox">
+          <div class="none">Loading the prepared help-desk queue…</div>
         </div>
-        <div id="pulseTargets"></div>
       </div>
     </section>
-
   </aside>
 
   <main class="incident-pane">
@@ -426,6 +405,7 @@
             <option value="">Auto — first configured</option>
             <option value="claude">Claude (Anthropic)</option>
             <option value="openai">OpenAI</option>
+            <option value="gemini">Google Gemini</option>
             <option value="offline">Offline playbooks</option>
           </select>
         </div>
@@ -463,6 +443,48 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
   ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
 
+function noteInline(source) {
+  const code = [];
+  let html = esc(source).replace(/`([^`]+)`/g, (_, value) => {
+    code.push(value);
+    return `@@AITCODE${code.length - 1}@@`;
+  });
+  html = html
+    .replace(/==([^=]+)==/g, '<span class="md-orange">$1</span>')
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\+\+([^+]+)\+\+/g, "<u>$1</u>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+    .replace(/_([^_]+)_/g, "<em>$1</em>");
+  return html.replace(/@@AITCODE(\d+)@@/g, (_, index) => `<code>${code[Number(index)]}</code>`);
+}
+
+function renderNoteMarkdown(source) {
+  const output = [];
+  let listOpen = false;
+  const closeList = () => {
+    if (listOpen) { output.push("</ul>"); listOpen = false; }
+  };
+  for (const raw of String(source ?? "").split(/\r?\n/)) {
+    const heading = raw.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      closeList();
+      const level = heading[1].length;
+      output.push(`<h${level}>${noteInline(heading[2])}</h${level}>`);
+      continue;
+    }
+    const item = raw.match(/^\s*-\s+(.+)$/);
+    if (item) {
+      if (!listOpen) { output.push("<ul>"); listOpen = true; }
+      output.push(`<li>${noteInline(item[1])}</li>`);
+      continue;
+    }
+    closeList();
+    if (raw.trim()) output.push(`<p>${noteInline(raw)}</p>`);
+  }
+  closeList();
+  return output.join("");
+}
+
 const ICON = { success:"✓", failed:"✗", blocked:"⛔", awaiting_approval:"⏸",
   awaiting_user:"👤", skipped:"·" };
 
@@ -485,135 +507,6 @@ async function loadProviders() {
     $("providerChips").innerHTML = `<span class="chip bad"><i class="dot"></i>provider check failed</span>`;
   }
 }
-
-/* ---------------- operations readiness + pulse ---------------- */
-
-let pulseEnabled = false;
-let latestPulse = null;
-
-async function loadIntegrations(probe = false) {
-  const button = $("probeIntegrations");
-  if (probe) { button.disabled = true; button.textContent = "Probing…"; }
-  try {
-    const response = await fetch(`/api/integrations${probe ? "?probe=1" : ""}`);
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error ?? "readiness check failed");
-    $("integrationList").innerHTML = data.components.map((component) => `
-      <div class="ops-row" title="${esc(component.capability)}">
-        <span class="name">${esc(component.label)}</span>
-        <span class="ops-state ${esc(component.state)}">${esc(component.state)}</span>
-        <span class="detail">${esc(component.detail)}</span>
-      </div>`).join("");
-  } catch (err) {
-    $("integrationList").innerHTML = `<div class="hint">Could not read integration state: ${esc(err.message)}</div>`;
-  } finally {
-    if (probe) { button.disabled = false; button.textContent = "Probe configured bridges"; }
-  }
-}
-
-function pulseHealthClass(health) {
-  if (health === "healthy") return "live";
-  if (health === "warning") return "simulated";
-  if (health === "critical") return "critical";
-  return "unavailable";
-}
-
-function renderPulse(data) {
-  const state = data.state ?? {};
-  latestPulse = data.history?.[0] ?? data.run ?? latestPulse;
-  pulseEnabled = Boolean(state.enabled);
-  $("pulseMode").textContent = state.phase ?? "stopped";
-  $("togglePulse").textContent = pulseEnabled ? "Stop schedule" : "Start 30s";
-
-  if (!latestPulse) {
-    $("pulseSummary").textContent = "No health pulse has run yet.";
-    $("pulseTargets").innerHTML = "";
-    return;
-  }
-  const c = latestPulse.counts;
-  $("pulseSummary").textContent =
-    `${latestPulse.trigger} · ${latestPulse.status} · ${c.healthy} healthy, ${c.warning} warning, ${c.critical} critical, ${c.unavailable} unavailable · ${new Date(latestPulse.finished_at).toLocaleTimeString()}`;
-  const alertTargets = new Set((latestPulse.alerts ?? []).map((alert) => alert.target_id));
-  $("pulseTargets").innerHTML = latestPulse.targets.map((target) => {
-    const finding = target.probes.find((probe) => probe.health !== "healthy") ?? target.probes[0];
-    return `<div class="pulse-target">
-      <div class="top"><span>${esc(target.target_name)}</span>
-        <span class="ops-state ${pulseHealthClass(target.health)}">${esc(target.health)}</span></div>
-      <div class="finding">${esc(target.kind)} · ${esc(target.source)} · ${esc(finding?.summary ?? "No probe result")}</div>
-      ${alertTargets.has(target.target_id)
-        ? `<button class="ghost" data-pulse-ticket="${esc(target.target_id)}">Open proactive ticket</button>`
-        : ""}
-    </div>`;
-  }).join("");
-
-  for (const button of $("pulseTargets").querySelectorAll("[data-pulse-ticket]")) {
-    button.addEventListener("click", async () => {
-      button.disabled = true; button.textContent = "Opening…";
-      try {
-        const response = await fetch("/api/pulse/ticket", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            runId: latestPulse.run_id,
-            targetId: button.getAttribute("data-pulse-ticket"),
-            provider: $("provider").value || undefined,
-          }),
-        });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error ?? "ticket could not be opened");
-        button.textContent = result.duplicate ? `Already ${result.ticket.reference}` : `Opened ${result.ticket.reference}`;
-      } catch (err) {
-        button.disabled = false; button.textContent = "Try opening ticket again";
-        button.title = err.message;
-      }
-    });
-  }
-}
-
-async function loadPulse() {
-  try {
-    const response = await fetch("/api/pulse");
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error ?? "pulse state unavailable");
-    renderPulse(data);
-  } catch (err) {
-    $("pulseSummary").textContent = `Pulse unavailable: ${err.message}`;
-  }
-}
-
-$("probeIntegrations").addEventListener("click", () => loadIntegrations(true));
-$("runPulse").addEventListener("click", async () => {
-  const button = $("runPulse");
-  button.disabled = true; button.textContent = "Checking…";
-  try {
-    const response = await fetch("/api/pulse/run", { method: "POST" });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error ?? "pulse failed");
-    renderPulse({ state: data.state, history: [data.run] });
-  } catch (err) {
-    $("pulseSummary").textContent = `Pulse failed: ${err.message}`;
-  } finally {
-    button.disabled = false; button.textContent = "Run now";
-  }
-});
-$("togglePulse").addEventListener("click", async () => {
-  const button = $("togglePulse");
-  button.disabled = true;
-  try {
-    const response = await fetch("/api/pulse/control", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: !pulseEnabled, intervalMs: 30_000 }),
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error ?? "pulse schedule could not be changed");
-    pulseEnabled = data.state.enabled;
-    $("pulseMode").textContent = data.state.phase;
-    button.textContent = pulseEnabled ? "Stop schedule" : "Start 30s";
-  } catch (err) {
-    $("pulseSummary").textContent = err.message;
-  } finally {
-    button.disabled = false;
-  }
-});
 
 /* ---------------- scenarios ---------------- */
 
@@ -668,6 +561,7 @@ async function loadScenarios() {
   }
   sel.addEventListener("change", showHint);
   showHint();
+  renderDemoQueue();
 
   $("target").addEventListener("change", showTargetNote);
     showTargetNote();
@@ -678,6 +572,50 @@ async function loadScenarios() {
     $("scenarioHint").textContent = `Could not load the catalogue: ${err.message}`;
     $("targetNote").textContent = "The console is still usable for no-device requests.";
   }
+}
+
+let selectedDemoTicket = null;
+
+function renderDemoQueue() {
+  const tickets = scenarios.simulated ?? [];
+  $("demoQueueCount").textContent = tickets.length ? String(tickets.length) : "";
+  if (!tickets.length) {
+    $("demoQueue").innerHTML = `<div class="none">No prepared tickets are available.</div>`;
+    return;
+  }
+  $("demoQueue").innerHTML = tickets.map((ticket) => `
+    <button class="tk ${selectedDemoTicket === ticket.key ? "active" : ""}" data-demo-ticket="${esc(ticket.key)}">
+      <div class="s">${esc(ticket.title)}</div>
+      <div class="m"><span class="badge">prepared</span><span>#${esc(ticket.ticketId)}</span></div>
+    </button>`).join("");
+  for (const button of $("demoQueue").querySelectorAll("[data-demo-ticket]")) {
+    button.addEventListener("click", () => selectDemoTicket(button.getAttribute("data-demo-ticket")));
+  }
+}
+
+function selectDemoTicket(key) {
+  const ticket = meta(key);
+  if (!ticket) return;
+  selectedDemoTicket = key;
+  watching = null;
+  currentRun = null;
+  if (source) { source.close(); source = null; }
+  renderDemoQueue();
+  renderInbox();
+  setMode(false);
+  $("scenario").value = key;
+  showHint();
+  $("stage").innerHTML = `
+    <div class="runhead">
+      <div><div class="t">${esc(ticket.title)}</div>
+      <div class="d">Prepared demo ticket #${esc(ticket.ticketId)}</div></div>
+      <span class="status running">prepared</span>
+    </div>
+    <div class="empty" style="padding-top:48px">
+      <h3>Ready to demonstrate</h3>
+      <p>${esc(ticket.demonstrates)}</p>
+      <p class="hint">Review the prepared ticket in the action centre, then select Run.</p>
+    </div>`;
 }
 
 function meta(key) {
@@ -1108,7 +1046,7 @@ function renderResult(run, internalNote, undoable, runId) {
       </div></div>` : ""}
 
     <details><summary>Internal note written to the ticket</summary>
-      <div><pre class="block">${esc(internalNote)}</pre></div></details>
+      <div><div class="note-markdown">${renderNoteMarkdown(internalNote)}</div></div></details>
 
     <details><summary>Audit trail — ${run.audit.length} entries</summary>
       <div><pre class="block">${esc(run.audit.map((a) =>
@@ -1321,8 +1259,10 @@ function openTicket(ticket, manual = false) {
   if (watching === ticket.id && currentRun === ticket.runId && !manual) return;
 
   watching = ticket.id;
+  selectedDemoTicket = null;
   currentRun = ticket.runId;
   renderInbox();
+  renderDemoQueue();
 
   if (source) { source.close(); source = null; }
 
@@ -1345,12 +1285,9 @@ function openTicket(ticket, manual = false) {
 
 setMode(true);
 loadProviders();
-loadIntegrations();
-loadPulse();
 loadScenarios();
 loadKnowledge();
 watchDesk();
-setInterval(loadPulse, 5_000);
 </script>
 </body>
 </html>

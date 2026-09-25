@@ -90,6 +90,8 @@ describe("static surface", () => {
     expect(html).toContain('rel="icon"');
     expect(html).toContain('href="/assets/theme.css"');
     expect(html).toContain('/assets/momentum-logo-reversed.png');
+    expect(html).toContain('id="demoQueue"');
+    expect(html).not.toContain('id="operationsCard"');
   });
 
   it("serves the Momentum brand assets", async () => {
@@ -130,7 +132,31 @@ describe("static surface", () => {
       providers: { name: string; state: string }[];
     };
     expect(providers.map((p) => p.name)).toContain("offline");
+    expect(providers.map((p) => p.name)).toContain("gemini");
     expect(providers.find((p) => p.name === "offline")?.state).toBe("ready");
+  });
+
+  it("serves options and settings without embedding credentials", async () => {
+    const page = await fetch(`${base}/settings`);
+    expect(page.status).toBe(200);
+    expect(page.headers.get("cache-control")).toBe("no-store");
+    const html = await page.text();
+    expect(html).toContain("Options &amp; settings");
+    expect(html).toContain("Gemini API key");
+    expect(html).toContain('type="password"');
+    expect(html).toContain('<select id="geminiModel">');
+    expect(html).toContain('<select id="claudeModel">');
+    expect(html).toContain('<select id="openaiModel">');
+    expect(html).toContain('id="operationsCard"');
+    expect(html).toContain('id="integrationList"');
+    expect(html).toContain('id="runPulse"');
+
+    const response = await fetch(`${base}/api/settings`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = await response.text();
+    expect(body).not.toContain("API_KEY");
+    expect(body).not.toContain("apiKey");
   });
 });
 

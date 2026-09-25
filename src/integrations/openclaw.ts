@@ -22,6 +22,8 @@ export const OPENCLAW_ENV = {
   timeoutMs: "OPENCLAW_BRIDGE_TIMEOUT_MS",
   /** Optional path dialect: `ait`, `aillium`, or unset to discover it. */
   dialect: "OPENCLAW_BRIDGE_DIALECT",
+  /** Demo-only: permit HTTP to a single-label container service name. */
+  allowContainerHttp: "OPENCLAW_BRIDGE_ALLOW_CONTAINER_HTTP",
 } as const;
 
 /**
@@ -65,6 +67,8 @@ export interface OpenClawConfig {
   baseUrl: string;
   runtimeToken: string;
   timeoutMs?: number;
+  /** Demo-only allowance for a single-label service on a private container network. */
+  allowContainerHttp?: boolean;
   /**
    * Pin the gateway's path dialect. Left unset, the client discovers it with a
    * read-only capabilities probe and then holds it for the rest of its life.
@@ -208,7 +212,7 @@ function isLoopbackHostname(hostname: string): boolean {
   );
 }
 
-function normaliseBaseUrl(raw: string): string {
+function normaliseBaseUrl(raw: string, allowContainerHttp = false): string {
   let url: URL;
   try {
     url = new URL(raw);
@@ -226,7 +230,15 @@ function normaliseBaseUrl(raw: string): string {
     );
   }
 
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopbackHostname(url.hostname))) {
+  const containerHttp =
+    allowContainerHttp &&
+    url.protocol === "http:" &&
+    /^[a-z0-9](?:[a-z0-9-]{0,62})$/i.test(url.hostname);
+  if (
+    url.protocol !== "https:" &&
+    !(url.protocol === "http:" && isLoopbackHostname(url.hostname)) &&
+    !containerHttp
+  ) {
     throw new OpenClawIntegrationError(
       "OpenClaw requires HTTPS except on a loopback host",
       "INVALID_CONFIG",
@@ -269,13 +281,15 @@ export function inspectOpenClawConfiguration(
   // find the right one, and a typo in an optional hint should not take the
   // whole integration offline.
   const dialectHint = env[OPENCLAW_ENV.dialect]?.trim().toLowerCase();
+  const allowContainerHttp = env[OPENCLAW_ENV.allowContainerHttp]?.trim() === "1";
 
   return {
     state: "configured",
     config: {
-      baseUrl: normaliseBaseUrl(baseUrl!),
+      baseUrl: normaliseBaseUrl(baseUrl!, allowContainerHttp),
       runtimeToken: runtimeToken!,
       timeoutMs: parseTimeout(env[OPENCLAW_ENV.timeoutMs]),
+      ...(allowContainerHttp ? { allowContainerHttp: true } : {}),
       ...(isOpenClawDialect(dialectHint) ? { dialect: dialectHint } : {}),
     },
     missing: [],
@@ -486,7 +500,7 @@ export class OpenClawDesktopClient {
         "INVALID_CONFIG",
       );
     }
-    this.#baseUrl = normaliseBaseUrl(config.baseUrl);
+    this.#baseUrl = normaliseBaseUrl(config.baseUrl, config.allowContainerHttp === true);
     this.#runtimeToken = config.runtimeToken.trim();
     this.#timeoutMs = config.timeoutMs === undefined
       ? DEFAULT_TIMEOUT_MS

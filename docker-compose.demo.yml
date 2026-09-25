@@ -2,13 +2,15 @@ name: ait-demo
 
 # The stakeholder demo, as a stack.
 #
-# Three containers on one network:
+# Five containers on one network:
 #
 #   desktop-bridge  a UI-TARS Desktop RPC bridge, speaking the real contract
 #                   against a simulated Windows desktop
 #   openclaw        an OpenClaw desktop gateway, speaking the real contract,
 #                   forwarding to that bridge
 #   ait             the demo itself: console, user portal, pulse, guardrails
+#   meshcentral     the official MeshCentral server
+#   mesh-endpoint   a real enrolled Linux agent used as a disposable lab host
 #
 # What this buys over the in-process simulation AIT ships with: every boundary
 # is real. Real sockets, two separate credentials, real 401s and 404s and
@@ -16,9 +18,10 @@ name: ait-demo
 # desktop. Those are the failure modes that show up in front of an audience,
 # and none of them can happen to a function call.
 #
-# What it is NOT: a real desktop. No screen is driven, no endpoint is enrolled,
-# no MDM tenant is connected. Every service says so in its own responses, and
-# the console's Operations card reads them rather than assuming.
+# What it is NOT: a real graphical desktop. MeshCentral has a real enrolled,
+# disposable Linux endpoint and live terminal transport, but no user's screen
+# is driven and no MDM tenant is connected. Every service says so in its own
+# responses, and the console's Operations card probes them rather than assuming.
 #
 #   cp .env.demo.example .env
 #   docker compose -f docker-compose.demo.yml up --build
@@ -26,6 +29,57 @@ name: ait-demo
 # Then open http://localhost:3110 (technician) and :3111 (user portal).
 
 services:
+  meshcentral:
+    build:
+      context: ./docker/meshcentral-lab
+    image: ait-meshcentral-lab
+    hostname: meshcentral.local
+    environment:
+      MESHCENTRAL_ADMIN_USER: "${MESHCENTRAL_ADMIN_USER:-aitadmin}"
+      MESHCENTRAL_ADMIN_PASSWORD: "${MESHCENTRAL_ADMIN_PASSWORD:-change-me-meshcentral}"
+      DYNAMIC_CONFIG: "false"
+      ARGS: "--wanonly"
+    ports:
+      - "127.0.0.1:${MESHCENTRAL_PORT:-20443}:443"
+    volumes:
+      - meshcentral_data:/opt/meshcentral/meshcentral-data
+      - meshcentral_files:/opt/meshcentral/meshcentral-files
+      - meshcentral_backups:/opt/meshcentral/meshcentral-backups
+    healthcheck:
+      test: ["CMD-SHELL", "curl -k --fail --silent https://127.0.0.1:443/health.ashx >/dev/null"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      default:
+        aliases:
+          - meshcentral.local
+
+  mesh-endpoint:
+    build:
+      context: ./docker/meshcentral-lab
+      dockerfile: endpoint.Dockerfile
+    image: ait-meshcentral-endpoint
+    hostname: ait-mesh-lab
+    depends_on:
+      meshcentral:
+        condition: service_healthy
+    environment:
+      MESHCENTRAL_INTERNAL_URL: "wss://meshcentral.local:443"
+      MESHCENTRAL_ADMIN_USER: "${MESHCENTRAL_ADMIN_USER:-aitadmin}"
+      MESHCENTRAL_ADMIN_PASSWORD: "${MESHCENTRAL_ADMIN_PASSWORD:-change-me-meshcentral}"
+    volumes:
+      - mesh_lab:/mesh-lab
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /mesh-lab/connection.env"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+      start_period: 5s
+    restart: unless-stopped
+
   desktop-bridge:
     build:
       context: .
@@ -91,25 +145,41 @@ services:
     build:
       context: .
     image: ait-demo
-    command: ["node", "dist/src/cli.js", "serve", "--port", "3110"]
+    command:
+      - /bin/sh
+      - -c
+      - set -a; . /mesh-lab/connection.env; set +a; exec node dist/src/cli.js serve --port 3110
     depends_on:
       openclaw:
+        condition: service_healthy
+      mesh-endpoint:
         condition: service_healthy
     environment:
       SIM_BIND_HOST: "0.0.0.0"
       OPENCLAW_BRIDGE_URL: "http://openclaw:18789"
+      # Explicitly scoped to the single-label service name on this private
+      # Compose network. Remote deployments still require HTTPS.
+      OPENCLAW_BRIDGE_ALLOW_CONTAINER_HTTP: "1"
       OPENCLAW_BRIDGE_RUNTIME_TOKEN: "${OPENCLAW_BRIDGE_RUNTIME_TOKEN:?set a gateway token in .env}"
-      # Optional. Without either key the offline playbook engine runs, which is
+      # The second channel to the same simulated host. Diagnostics and
+      # verification use this terminal route; desktop input still goes only
+      # through the governed OpenClaw route above.
+      AILLIUM_DESKTOP_BRIDGE_URL: "http://desktop-bridge:47891"
+      AILLIUM_DESKTOP_BRIDGE_TOKEN: "${AILLIUM_DESKTOP_BRIDGE_TOKEN:?set a bridge token in .env}"
+      AIT_PORTAL_PUBLIC_URL: "http://localhost:${AIT_PORTAL_PORT:-3111}/"
+      # Demo-only authority is visibly labelled and exercises the same
+      # run-scoped token, fence and cancellation fields as a real issuer.
+      AIT_SIMULATED_DESKTOP_AUTHORITY: "1"
+      NODE_EXTRA_CA_CERTS: "/meshcentral-data/root-cert-public.crt"
+      # Optional. Without any model key the offline playbook engine runs, which is
       # what makes the stack demonstrable with no credentials at all.
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      ANTHROPIC_MODEL: "${ANTHROPIC_MODEL:-}"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_MODEL: "${OPENAI_MODEL:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GEMINI_MODEL: "${GEMINI_MODEL:-}"
       AIT_PROVIDER: "${AIT_PROVIDER:-}"
-      # Optional live endpoint. Left unset, MeshCentral reads UNAVAILABLE in
-      # the Operations card rather than being quietly simulated.
-      MESHCENTRAL_URL: "${MESHCENTRAL_URL:-}"
-      MESHCENTRAL_TOKEN: "${MESHCENTRAL_TOKEN:-}"
-      MESHCENTRAL_MESH_ID: "${MESHCENTRAL_MESH_ID:-}"
-      MESHCENTRAL_DEVICE_ID: "${MESHCENTRAL_DEVICE_ID:-}"
       # Optional live help desk. Left unset, the in-memory queue is used.
       ZENDESK_SUBDOMAIN: "${ZENDESK_SUBDOMAIN:-}"
       ZENDESK_EMAIL: "${ZENDESK_EMAIL:-}"
@@ -119,7 +189,13 @@ services:
       - "${AIT_PORTAL_PORT:-3111}:3111"
     volumes:
       - evidence:/app/run-artifacts
+      - mesh_lab:/mesh-lab:ro
+      - meshcentral_data:/meshcentral-data:ro
     restart: unless-stopped
 
 volumes:
   evidence:
+  meshcentral_data:
+  meshcentral_files:
+  meshcentral_backups:
+  mesh_lab:

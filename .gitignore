@@ -3,5 +3,6 @@ dist/
 *.log
 .env
 .env.local
+.env.*.local
 run-artifacts/
 .DS_Store

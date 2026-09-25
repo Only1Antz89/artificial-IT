@@ -158,6 +158,9 @@ describe("the internal note", () => {
     });
 
     const note = renderInternalNote(run);
+    expect(note).toContain("# ==AIT — automated triage==");
+    expect(note).toContain("## Steps taken");
+    expect(note).toContain("### ++Audit reference++");
     expect(note).toContain("⛔");
     expect(note).toContain("block.credentials.password-change");
     expect(note).toMatch(/Escalated to/);

@@ -86,12 +86,11 @@ follows the same approval and escalation flow as a user-raised ticket.
 
 ## The demo stack
 
-`npm run demo:stack` brings the whole thing up as three containers talking to
-each other over real HTTP: AIT, an OpenClaw desktop gateway, and a UI-TARS
-Desktop RPC bridge with a shell onto the same simulated host. Every boundary is
-real - two separate credentials, real 401s and 404s and timeouts, a gateway
-that refuses an action before it reaches a desktop - against a desktop that is
-simulated and says so in every response it sends.
+`npm run demo:stack` brings the whole thing up as five containers: AIT, an
+OpenClaw desktop gateway, a UI-TARS RPC simulator, the official MeshCentral
+server, and a real enrolled Linux agent on a disposable endpoint. The network,
+credentials, control channel and terminal relay are real; graphical desktop
+input remains simulated and says so in every response.
 
 That is what promotes the Operations card from `SIMULATED` to `LIVE`: something
 answered. See **[DEMO_STACK.md](DEMO_STACK.md)** for the architecture, the
@@ -187,7 +186,7 @@ npm run cli -- check "acme-repair --fix-all"
 
 ## Reasoning providers
 
-The same technician runs on either provider, with identical prompts, identical
+The same technician runs on every provider, with identical prompts, identical
 structured outputs and identical guardrails. **The safety properties do not
 depend on which model is answering.**
 
@@ -195,11 +194,12 @@ depend on which model is answering.**
 |---|---|---|
 | `claude` | Claude Opus 5, adaptive thinking, structured outputs | `ANTHROPIC_API_KEY` |
 | `openai` | OpenAI Responses API, strict structured outputs | `OPENAI_API_KEY` |
+| `gemini` | Google Gemini API, JSON Schema structured outputs | `GEMINI_API_KEY` |
 | `offline` | Deterministic playbook engine | nothing |
 | `auto` *(default)* | First of the above that is configured | â€” |
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY=sk-...
+export GEMINI_API_KEY=...   # or ANTHROPIC_API_KEY / OPENAI_API_KEY
 npm run demo
 ```
 
@@ -208,7 +208,15 @@ That fallback is reported loudly in the CLI, the API response and the console â€
 a run answered by playbooks is a materially different thing from one answered by
 a frontier model, and you should never have to guess which you got.
 
-Models are overridable: `ANTHROPIC_MODEL`, `OPENAI_MODEL`.
+Models are overridable: `ANTHROPIC_MODEL`, `OPENAI_MODEL`, `GEMINI_MODEL`.
+
+The technician console also exposes **Options & settings** at `/settings`.
+There an operator can add or replace an Anthropic, OpenAI or Gemini key, choose the
+model, set the preferred provider and test model access without restarting the
+server. Browser-supplied keys are write-only and held in the running process:
+they are never returned by the settings API and disappear when the process or
+container is recreated. Production deployments should continue to inject
+credentials through environment variables or Docker secrets.
 
 ## The demo
 
@@ -318,6 +326,9 @@ ZENDESK_API_TOKEN=...
 # MeshCentral (remote device sessions)
 MESHCENTRAL_URL=https://mesh.acme.internal
 MESHCENTRAL_TOKEN=...
+# Or use a MeshCentral login-token username/password pair:
+# MESHCENTRAL_USER=~t:ait-operator
+# MESHCENTRAL_PASSWORD=...
 MESHCENTRAL_MESH_ID=mesh/domain/id
 MESHCENTRAL_DEVICE_ID=node/domain/id
 
@@ -346,11 +357,11 @@ step, fence and cancellation context. This repository never mints or fakes that
 authority. `http://` is accepted only for a loopback gateway; remote gateways
 must use HTTPS.
 
-Out of the box, the console labels MeshCentral and OpenClaw as unavailable and
-UI-TARS control as simulated. The prepared Wi-Fi scenario is stateful and uses
-the live action contract, but it is not presented as a real remote click. Press
-**Probe configured bridges** in the Operations card to promote a component to
-live only after it actually answers.
+In the Docker demo, MeshCentral is configured against the included disposable
+endpoint; pressing **Probe configured bridges** opens a real relay and runs a
+read-only command before marking it `LIVE`. The prepared Wi-Fi scenario is
+stateful and uses the live action contract, but its graphical click remains a
+clearly labelled UI-TARS simulation.
 
 See [INTEGRATIONS.md](INTEGRATIONS.md) for the audited repository layout,
 compatibility notes and the exact path from ticket to terminal and desktop

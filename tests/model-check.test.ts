@@ -7,7 +7,7 @@
  * they are worth testing rather than assuming.
  */
 import { describe, expect, it } from "vitest";
-import { checkClaudeModel, checkOpenAIModel, withTimeout } from "../src/agent/model-check.js";
+import { checkClaudeModel, checkGeminiModel, checkOpenAIModel, withTimeout } from "../src/agent/model-check.js";
 
 /** Minimal stand-ins shaped like the bits of each SDK the check touches. */
 function anthropicStub(ids: string[] | Error) {
@@ -31,6 +31,21 @@ function openaiStub(ids: string[] | Error) {
       list: async () => {
         if (ids instanceof Error) throw ids;
         return { data: ids.map((id) => ({ id })) };
+      },
+    },
+  } as never;
+}
+
+function geminiStub(ids: string[] | Error) {
+  return {
+    models: {
+      list: async () => {
+        if (ids instanceof Error) throw ids;
+        return {
+          async *[Symbol.asyncIterator]() {
+            for (const name of ids) yield { name };
+          },
+        };
       },
     },
   } as never;
@@ -102,6 +117,36 @@ describe("OpenAI model verification", () => {
     const check = await checkOpenAIModel("gpt-5", openaiStub(new Error("network down")));
     expect(check.ok).toBe(true);
     expect(check.skipped).toContain("network down");
+  });
+});
+
+describe("Gemini model verification", () => {
+  it("normalises resource names returned by the models endpoint", async () => {
+    const check = await checkGeminiModel(
+      "gemini-2.5-pro",
+      geminiStub(["models/gemini-2.5-pro"]),
+    );
+    expect(check.ok).toBe(true);
+    expect(check.skipped).toBeUndefined();
+  });
+
+  it("suggests Gemini generation models when the configured id is wrong", async () => {
+    const check = await checkGeminiModel(
+      "gemini-nope",
+      geminiStub(["models/text-embedding-004", "models/gemini-2.5-flash"]),
+    );
+    expect(check.ok).toBe(false);
+    expect(check.available).toEqual(["gemini-2.5-flash"]);
+    expect(check.message).toMatch(/GEMINI_MODEL/);
+  });
+
+  it("does not block a run when the list call fails", async () => {
+    const check = await checkGeminiModel(
+      "gemini-2.5-pro",
+      geminiStub(new Error("quota unavailable")),
+    );
+    expect(check.ok).toBe(true);
+    expect(check.skipped).toContain("quota unavailable");
   });
 });
 

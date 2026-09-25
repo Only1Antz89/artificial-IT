@@ -32,6 +32,7 @@
  * it exists to secure.
  */
 import { randomBytes } from "node:crypto";
+import { WebSocket as WsWebSocket } from "ws";
 import type { CommandResult } from "../contracts/index.js";
 import type { DeviceInfo } from "../contracts/ticket.js";
 import type { DeviceSession, ScreenCapture, SessionCapabilities } from "./device.js";
@@ -60,7 +61,11 @@ export interface MeshCentralConfig {
    * Server login cookie or login key, as `meshctrl --loginkey` takes.
    * Appended to the control URL as `?auth=`.
    */
-  operatorToken: string;
+  operatorToken?: string;
+  /** MeshCentral username, including a generated login-token username. */
+  operatorUsername?: string;
+  /** Password paired with operatorUsername. Never sent outside the TLS tunnel. */
+  operatorPassword?: string;
   /** Mesh (device group) the device belongs to. */
   meshId: string;
   /** Milliseconds to wait for the agent to answer a tunnel request. */
@@ -70,9 +75,17 @@ export interface MeshCentralConfig {
 export function meshConfigFromEnv(): MeshCentralConfig | undefined {
   const serverUrl = process.env["MESHCENTRAL_URL"];
   const operatorToken = process.env["MESHCENTRAL_TOKEN"];
+  const operatorUsername = process.env["MESHCENTRAL_USER"];
+  const operatorPassword = process.env["MESHCENTRAL_PASSWORD"];
   const meshId = process.env["MESHCENTRAL_MESH_ID"];
-  if (!serverUrl || !operatorToken || !meshId) return undefined;
-  return { serverUrl, operatorToken, meshId };
+  const hasPasswordAuth = Boolean(operatorUsername && operatorPassword);
+  if (!serverUrl || !meshId || (!operatorToken && !hasPasswordAuth)) return undefined;
+  return {
+    serverUrl,
+    meshId,
+    ...(operatorToken ? { operatorToken } : {}),
+    ...(hasPasswordAuth ? { operatorUsername, operatorPassword } : {}),
+  };
 }
 
 /** MeshCentral's relay protocol numbers. */
@@ -147,8 +160,16 @@ export class MeshCentralSession implements DeviceSession {
     if (this.#cookies) return;
     this.status = "establishing";
 
-    const url = `${wsUrl(this.config.serverUrl, "/control.ashx")}?auth=${encodeURIComponent(this.config.operatorToken)}`;
-    const ws = await openSocket(url, this.timeout, "MeshCentral control channel");
+    const authQuery = this.config.operatorToken
+      ? `?auth=${encodeURIComponent(this.config.operatorToken)}`
+      : "";
+    const url = `${wsUrl(this.config.serverUrl, "/control.ashx")}${authQuery}`;
+    const headers = this.config.operatorUsername && this.config.operatorPassword
+      ? {
+          "x-meshauth": `${Buffer.from(this.config.operatorUsername).toString("base64")},${Buffer.from(this.config.operatorPassword).toString("base64")}`,
+        }
+      : undefined;
+    const ws = await openSocket(url, this.timeout, "MeshCentral control channel", headers);
     this.#control = ws;
 
     // The cookies are short-lived and scoped to this operator; both sides of the
@@ -339,7 +360,10 @@ export class MeshCentralSession implements DeviceSession {
       };
 
       relay.addEventListener("message", onMessage);
-      relay.send(line);
+      // MeshCentral's terminal relay treats keyboard input as binary frames.
+      // Sending a text frame opens the shell but the agent does not forward it
+      // to the PTY, which looks exactly like a command timeout.
+      relay.send(Buffer.from(line, "utf8"));
     });
 
     return parseShellOutput(command, output, Date.now() - started);
@@ -473,11 +497,18 @@ function frameToText(data: unknown): string {
   return String(data);
 }
 
-function openSocket(url: string, timeoutMs: number, what: string): Promise<WebSocket> {
+function openSocket(
+  url: string,
+  timeoutMs: number,
+  what: string,
+  headers?: Record<string, string>,
+): Promise<WebSocket> {
   return new Promise<WebSocket>((resolve, reject) => {
     let ws: WebSocket;
     try {
-      ws = new WebSocket(url);
+      ws = headers
+        ? (new WsWebSocket(url, { headers }) as unknown as WebSocket)
+        : new WebSocket(url);
     } catch (err) {
       reject(new Error(`Could not open ${what}: ${err instanceof Error ? err.message : err}`));
       return;

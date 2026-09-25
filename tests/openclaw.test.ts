@@ -108,6 +108,31 @@ describe("OpenClaw configuration", () => {
       OPENCLAW_BRIDGE_RUNTIME_TOKEN: "runtime-secret",
     }).state).toBe("configured");
   });
+
+  it("allows an explicitly scoped Compose service name over HTTP", () => {
+    expect(inspectOpenClawConfiguration({
+      OPENCLAW_BRIDGE_URL: "http://openclaw:18789",
+      OPENCLAW_BRIDGE_RUNTIME_TOKEN: "runtime-secret",
+      OPENCLAW_BRIDGE_ALLOW_CONTAINER_HTTP: "1",
+    })).toEqual({
+      state: "configured",
+      missing: [],
+      config: {
+        baseUrl: "http://openclaw:18789",
+        runtimeToken: "runtime-secret",
+        timeoutMs: 5000,
+        allowContainerHttp: true,
+      },
+    });
+  });
+
+  it("does not let the container HTTP flag weaken remote transport", () => {
+    expect(() => inspectOpenClawConfiguration({
+      OPENCLAW_BRIDGE_URL: "http://openclaw.example.com",
+      OPENCLAW_BRIDGE_RUNTIME_TOKEN: "runtime-secret",
+      OPENCLAW_BRIDGE_ALLOW_CONTAINER_HTTP: "1",
+    })).toThrow(/HTTPS/);
+  });
 });
 
 describe("OpenClaw desktop bridge", () => {

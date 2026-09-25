@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Momentum AIT — Options &amp; settings</title>
+<link rel="stylesheet" href="/assets/theme.css">
+<link rel="icon" type="image/png" href="/assets/momentum-mark.png">
+<style>
+  :root{--accent:#163e58;--accent-ink:#fff;--accent-soft:#eaf1f5;--accent-line:#b8cdd9}
+  @media (prefers-color-scheme:dark){:root{--accent:#8fc2dd;--accent-ink:#08111f;--accent-soft:#102432;--accent-line:#31566c}}
+  body{font-size:14px;line-height:1.55}
+  header{background:var(--brand-navy-deep);border-bottom:3px solid var(--brand-orange);padding:13px 22px;display:flex;align-items:center;gap:16px}
+  header .brand-logo{height:27px} header .product-name{color:#fff;border-left-color:rgba(255,255,255,.28)}
+  header .product-name span{color:rgba(255,255,255,.65)}
+  .back{margin-left:auto;color:#fff;text-decoration:none;border:1px solid rgba(255,255,255,.28);padding:7px 13px;border-radius:9px;font-size:12.5px}
+  .back:hover{border-color:var(--brand-orange);background:rgba(255,255,255,.06)}
+  main{max-width:1040px;margin:0 auto;padding:34px 22px 56px}
+  .intro{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:28px;align-items:start;margin-bottom:24px}
+  h1{font-size:28px;line-height:1.16;letter-spacing:-.025em;margin:0 0 8px} .intro p{max-width:66ch;color:var(--muted);margin:0}
+  .runtime-note{font-size:11.5px;color:var(--warn);background:var(--warn-bg);border:1px solid var(--warn-line);border-radius:9px;padding:8px 11px;max-width:210px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow-1);margin-top:16px}
+  .card-head{padding:16px 18px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center}
+  .card-head div:first-child{flex:1}.card-head h2{font-size:16px;margin:0}.card-head p{font-size:12px;color:var(--muted);margin:3px 0 0}
+  .state{font-size:10px;letter-spacing:.07em;text-transform:uppercase;font-weight:750;padding:3px 8px;border:1px solid var(--line);border-radius:999px;color:var(--muted)}
+  .state.ready{color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)}
+  .body{padding:18px}.fields{display:grid;grid-template-columns:1fr 1fr;gap:16px}.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
+  input,select,button{font:inherit;border:1px solid var(--line);border-radius:9px;background:var(--panel-2);color:var(--ink);padding:10px 11px;width:100%}
+  input:focus,select:focus{outline:2px solid var(--accent);outline-offset:1px}.hint{color:var(--muted);font-size:11.5px;margin:7px 0 0}
+  .actions{display:flex;gap:9px;align-items:center;margin-top:15px;flex-wrap:wrap}.actions button{width:auto;padding:8px 13px;font-weight:650;cursor:pointer}
+  button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}button.danger{color:var(--stop);background:var(--stop-bg);border-color:var(--stop-line)}
+  button:disabled{opacity:.55;cursor:progress}.preferred{display:grid;grid-template-columns:minmax(220px,340px) 1fr;gap:20px;align-items:end}
+  .savebar{display:flex;align-items:center;gap:14px;margin-top:22px}.savebar button{width:auto;min-width:150px;padding:11px 17px;font-weight:700;cursor:pointer}
+  #message{font-size:12.5px;color:var(--muted)}#message.ok{color:var(--ok)}#message.bad{color:var(--stop)}
+  .security{margin-top:24px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}.security strong{color:var(--ink)}
+  .section-heading{margin:30px 0 10px}.section-heading:first-of-type{margin-top:0}
+  .section-heading h2{font-size:20px;line-height:1.25;letter-spacing:-.015em;margin:0}
+  .section-heading p{color:var(--muted);margin:5px 0 0;max-width:70ch}
+  .operations-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:0}
+  .operations-grid>section{padding:18px}.operations-grid>section+section{border-left:1px solid var(--line)}
+  .operations-grid h3{font-size:14px;margin:0 0 4px}.operations-grid .lead{font-size:11.5px;color:var(--muted);margin:0 0 15px}
+  .ops-list{display:grid;gap:11px}.ops-row{display:grid;grid-template-columns:1fr auto;gap:3px 10px;align-items:center}
+  .ops-row .name{font-size:12.5px;font-weight:700}.ops-row .detail{grid-column:1/-1;font-size:11.5px;line-height:1.4;color:var(--muted)}
+  .ops-state{font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;font-weight:750;padding:2px 7px;border-radius:999px;border:1px solid var(--line)}
+  .ops-state.live{color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)}
+  .ops-state.configured{color:var(--accent);background:var(--accent-soft);border-color:var(--accent-line)}
+  .ops-state.simulated{color:var(--warn);background:var(--warn-bg);border-color:var(--warn-line)}
+  .ops-state.unavailable{color:var(--muted);background:var(--panel-2)}
+  .ops-state.critical{color:var(--stop);background:var(--stop-bg);border-color:var(--stop-line)}
+  .ops-button{margin-top:15px;width:auto;padding:8px 13px;font-weight:650;cursor:pointer}
+  .pulse-head{display:flex;justify-content:space-between;gap:8px;align-items:center}
+  .pulse-head span{font-size:11px;color:var(--muted)}.pulse-summary{font-size:11.5px;color:var(--muted);margin-top:5px}
+  .ops-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:13px}.ops-actions button{padding:8px;font-size:11.5px;cursor:pointer}
+  .pulse-target{border-top:1px dashed var(--line);padding-top:9px;margin-top:9px}.pulse-target .top{display:flex;gap:6px;align-items:center;justify-content:space-between;font-size:11.5px}
+  .pulse-target .finding{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.4}.pulse-target button{width:auto;padding:5px 8px;font-size:10.5px;margin-top:6px;cursor:pointer}
+  @media(max-width:680px){header{padding:12px 16px}.product-name span{display:none}.intro{grid-template-columns:1fr}.runtime-note{max-width:none}.fields,.preferred{grid-template-columns:1fr}main{padding:26px 16px 44px}}
+  @media(max-width:760px){.operations-grid{grid-template-columns:1fr}.operations-grid>section+section{border-left:0;border-top:1px solid var(--line)}}
+  @media(max-width:420px){header .product-name{display:none}.back{margin-left:auto}.brand-logo{height:23px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand-lockup">
+    <img class="brand-logo" src="/assets/momentum-logo-reversed.png" alt="Momentum">
+    <div class="product-name">Options &amp; settings<span>AIT service desk</span></div>
+  </div>
+  <a class="back" href="/">Back to console</a>
+</header>
+
+<main>
+  <div class="intro">
+    <div>
+      <h1>Options &amp; settings</h1>
+      <p>Manage operational services, proactive monitoring and the reasoning provider used for new support runs.</p>
+    </div>
+    <div class="runtime-note">Keys are held in this running AIT process only and are cleared when its container is recreated.</div>
+  </div>
+
+  <div class="section-heading">
+    <h2>Operations</h2>
+    <p>Check the services that power the demo and manage proactive endpoint, service and mobile monitoring.</p>
+  </div>
+  <section class="card operations-grid" id="operationsCard">
+    <section>
+      <h3>Integration readiness</h3>
+      <p class="lead">Live probes verify configured bridges rather than relying on configuration alone.</p>
+      <div id="integrationList" class="ops-list"><div class="hint">Reading adapter state…</div></div>
+      <button type="button" class="ops-button" id="probeIntegrations">Probe configured bridges</button>
+    </section>
+    <section>
+      <div class="pulse-head"><h3>Proactive pulse</h3><span id="pulseMode">stopped</span></div>
+      <p class="lead">Run posture checks now or on a 30-second demo schedule.</p>
+      <div id="pulseSummary" class="pulse-summary">No health pulse has run yet.</div>
+      <div class="ops-actions">
+        <button type="button" id="runPulse">Run now</button>
+        <button type="button" id="togglePulse">Start 30s</button>
+      </div>
+      <div id="pulseTargets"></div>
+    </section>
+  </section>
+
+  <div class="section-heading">
+    <h2>Reasoning provider</h2>
+    <p>Connect an LLM for live intake, diagnosis, planning and ticket documentation. Guardrails and technician approvals stay in control whichever provider is selected.</p>
+  </div>
+
+  <section class="card">
+    <div class="body preferred">
+      <div class="field">
+        <label for="preferredProvider">Preferred provider for new runs</label>
+        <select id="preferredProvider">
+          <option value="auto">Auto — first configured</option>
+          <option value="claude">Claude (Anthropic)</option>
+          <option value="openai">OpenAI</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="offline">Offline playbooks</option>
+        </select>
+      </div>
+      <p class="hint">Changing this does not affect work already in progress.</p>
+    </div>
+  </section>
+
+  <section class="card" data-provider="gemini">
+    <div class="card-head">
+      <div><h2>Gemini</h2><p>Google structured reasoning</p></div>
+      <span class="state" id="geminiState">Checking</span>
+    </div>
+    <div class="body">
+      <div class="fields">
+        <div class="field">
+          <label for="geminiKey">Gemini API key</label>
+          <input id="geminiKey" type="password" autocomplete="new-password" spellcheck="false" placeholder="Leave blank to keep the current key">
+          <p class="hint" id="geminiKeyHint">The saved key is never returned to this page.</p>
+        </div>
+        <div class="field">
+          <label for="geminiModel">Model</label>
+          <select id="geminiModel">
+            <option value="">Application default</option>
+            <option value="gemini-3.8-flash">Gemini 3.8 Flash</option>
+            <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+            <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite</option>
+            <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
+            <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+          </select>
+          <p class="hint">Choose a Gemini model available to this API key.</p>
+        </div>
+      </div>
+      <div class="actions">
+        <button type="button" data-test="gemini">Test connection</button>
+        <button type="button" class="danger" data-remove="gemini">Remove key</button>
+        <span class="hint" id="geminiTest"></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" data-provider="claude">
+    <div class="card-head">
+      <div><h2>Claude</h2><p>Anthropic structured reasoning</p></div>
+      <span class="state" id="claudeState">Checking</span>
+    </div>
+    <div class="body">
+      <div class="fields">
+        <div class="field">
+          <label for="claudeKey">Anthropic API key</label>
+          <input id="claudeKey" type="password" autocomplete="new-password" spellcheck="false" placeholder="Leave blank to keep the current key">
+          <p class="hint" id="claudeKeyHint">The saved key is never returned to this page.</p>
+        </div>
+        <div class="field">
+          <label for="claudeModel">Model</label>
+          <select id="claudeModel">
+            <option value="">Application default</option>
+            <option value="claude-opus-5">Claude Opus 5</option>
+            <option value="claude-sonnet-5">Claude Sonnet 5</option>
+            <option value="claude-fable-5">Claude Fable 5</option>
+            <option value="claude-opus-4-8">Claude Opus 4.8</option>
+            <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+            <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
+          </select>
+          <p class="hint">Choose an active Claude model available to this API key.</p>
+        </div>
+      </div>
+      <div class="actions">
+        <button type="button" data-test="claude">Test connection</button>
+        <button type="button" class="danger" data-remove="claude">Remove key</button>
+        <span class="hint" id="claudeTest"></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" data-provider="openai">
+    <div class="card-head">
+      <div><h2>OpenAI</h2><p>Responses API with strict structured output</p></div>
+      <span class="state" id="openaiState">Checking</span>
+    </div>
+    <div class="body">
+      <div class="fields">
+        <div class="field">
+          <label for="openaiKey">OpenAI API key</label>
+          <input id="openaiKey" type="password" autocomplete="new-password" spellcheck="false" placeholder="Leave blank to keep the current key">
+          <p class="hint" id="openaiKeyHint">The saved key is never returned to this page.</p>
+        </div>
+        <div class="field">
+          <label for="openaiModel">Model</label>
+          <select id="openaiModel">
+            <option value="">Application default</option>
+            <option value="gpt-5.6-sol">GPT-5.6 Sol</option>
+            <option value="gpt-5.6-terra">GPT-5.6 Terra</option>
+            <option value="gpt-5.6-luna">GPT-5.6 Luna</option>
+            <option value="gpt-5.6">GPT-5.6 alias</option>
+            <option value="gpt-5.2">GPT-5.2</option>
+            <option value="gpt-5">GPT-5</option>
+          </select>
+          <p class="hint">Choose an OpenAI Responses API model available to this key.</p>
+        </div>
+      </div>
+      <div class="actions">
+        <button type="button" data-test="openai">Test connection</button>
+        <button type="button" class="danger" data-remove="openai">Remove key</button>
+        <span class="hint" id="openaiTest"></span>
+      </div>
+    </div>
+  </section>
+
+  <div class="savebar">
+    <button class="primary" id="save">Apply settings</button>
+    <span id="message" role="status" aria-live="polite"></span>
+  </div>
+
+  <div class="security"><strong>Credential handling:</strong> AIT does not display, log or return configured keys. For a persistent deployment, inject credentials with Docker secrets or environment variables instead of the browser.</div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (value) => String(value ?? "").replace(/[&<>"]/g, (character) =>
+  ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[character]));
+let settings;
+
+let pulseEnabled = false;
+let latestPulse = null;
+
+async function loadIntegrations(probe = false) {
+  const button = $("probeIntegrations");
+  if (probe) { button.disabled = true; button.textContent = "Probing…"; }
+  try {
+    const response = await fetch(`/api/integrations${probe ? "?probe=1" : ""}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error ?? "readiness check failed");
+    $("integrationList").innerHTML = data.components.map((component) => `
+      <div class="ops-row" title="${esc(component.capability)}">
+        <span class="name">${esc(component.label)}</span>
+        <span class="ops-state ${esc(component.state)}">${esc(component.state)}</span>
+        <span class="detail">${esc(component.detail)}</span>
+      </div>`).join("");
+  } catch (error) {
+    $("integrationList").innerHTML = `<div class="hint">Could not read integration state: ${esc(error.message)}</div>`;
+  } finally {
+    if (probe) { button.disabled = false; button.textContent = "Probe configured bridges"; }
+  }
+}
+
+function pulseHealthClass(health) {
+  if (health === "healthy") return "live";
+  if (health === "warning") return "simulated";
+  if (health === "critical") return "critical";
+  return "unavailable";
+}
+
+function renderPulse(data) {
+  const state = data.state ?? {};
+  latestPulse = data.history?.[0] ?? data.run ?? latestPulse;
+  pulseEnabled = Boolean(state.enabled);
+  $("pulseMode").textContent = state.phase ?? "stopped";
+  $("togglePulse").textContent = pulseEnabled ? "Stop schedule" : "Start 30s";
+  if (!latestPulse) {
+    $("pulseSummary").textContent = "No health pulse has run yet.";
+    $("pulseTargets").innerHTML = "";
+    return;
+  }
+  const counts = latestPulse.counts;
+  $("pulseSummary").textContent =
+    `${latestPulse.trigger} · ${latestPulse.status} · ${counts.healthy} healthy, ${counts.warning} warning, ${counts.critical} critical, ${counts.unavailable} unavailable · ${new Date(latestPulse.finished_at).toLocaleTimeString()}`;
+  const alertTargets = new Set((latestPulse.alerts ?? []).map((alert) => alert.target_id));
+  $("pulseTargets").innerHTML = latestPulse.targets.map((target) => {
+    const finding = target.probes.find((probe) => probe.health !== "healthy") ?? target.probes[0];
+    return `<div class="pulse-target">
+      <div class="top"><span>${esc(target.target_name)}</span>
+        <span class="ops-state ${pulseHealthClass(target.health)}">${esc(target.health)}</span></div>
+      <div class="finding">${esc(target.kind)} · ${esc(target.source)} · ${esc(finding?.summary ?? "No probe result")}</div>
+      ${alertTargets.has(target.target_id)
+        ? `<button type="button" data-pulse-ticket="${esc(target.target_id)}">Open proactive ticket</button>`
+        : ""}
+    </div>`;
+  }).join("");
+  for (const button of $("pulseTargets").querySelectorAll("[data-pulse-ticket]")) {
+    button.addEventListener("click", async () => {
+      button.disabled = true; button.textContent = "Opening…";
+      try {
+        const response = await fetch("/api/pulse/ticket", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            runId: latestPulse.run_id,
+            targetId: button.getAttribute("data-pulse-ticket"),
+          }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error ?? "ticket could not be opened");
+        button.textContent = result.duplicate ? `Already ${result.ticket.reference}` : `Opened ${result.ticket.reference}`;
+      } catch (error) {
+        button.disabled = false; button.textContent = "Try opening ticket again";
+        button.title = error.message;
+      }
+    });
+  }
+}
+
+async function loadPulse() {
+  try {
+    const response = await fetch("/api/pulse");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error ?? "pulse state unavailable");
+    renderPulse(data);
+  } catch (error) {
+    $("pulseSummary").textContent = `Pulse unavailable: ${error.message}`;
+  }
+}
+
+$("probeIntegrations").addEventListener("click", () => loadIntegrations(true));
+$("runPulse").addEventListener("click", async () => {
+  const button = $("runPulse");
+  button.disabled = true; button.textContent = "Checking…";
+  try {
+    const response = await fetch("/api/pulse/run", { method: "POST" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error ?? "pulse failed");
+    renderPulse({ state: data.state, history: [data.run] });
+  } catch (error) {
+    $("pulseSummary").textContent = `Pulse failed: ${error.message}`;
+  } finally {
+    button.disabled = false; button.textContent = "Run now";
+  }
+});
+$("togglePulse").addEventListener("click", async () => {
+  const button = $("togglePulse");
+  button.disabled = true;
+  try {
+    const response = await fetch("/api/pulse/control", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: !pulseEnabled, intervalMs: 30_000 }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error ?? "pulse schedule could not be changed");
+    pulseEnabled = data.state.enabled;
+    $("pulseMode").textContent = data.state.phase;
+    button.textContent = pulseEnabled ? "Stop schedule" : "Start 30s";
+  } catch (error) {
+    $("pulseSummary").textContent = error.message;
+  } finally { button.disabled = false; }
+});
+
+function render(data) {
+  settings = data;
+  $("preferredProvider").value = data.preferredProvider;
+  for (const name of ["claude", "openai", "gemini"]) {
+    const provider = data.providers[name];
+    const state = $(`${name}State`);
+    state.textContent = provider.configured ? `Configured · ${provider.source}` : "Not configured";
+    state.className = `state${provider.configured ? " ready" : ""}`;
+    const model = $(`${name}Model`);
+    if (provider.model && !Array.from(model.options).some((option) => option.value === provider.model)) {
+      model.add(new Option(`${provider.model} · configured`, provider.model));
+    }
+    model.value = provider.model;
+    $(`${name}KeyHint`).textContent = provider.configured
+      ? "A key is configured. Enter a new one only to replace it."
+      : "No key is configured. The key will never be returned to this page.";
+    document.querySelector(`[data-remove="${name}"]`).disabled = !provider.configured;
+  }
+}
+
+async function load() {
+  const response = await fetch("/api/settings", { cache: "no-store" });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "Settings could not be loaded.");
+  render(data.settings);
+}
+
+async function save(extra = {}) {
+  const button = $("save");
+  button.disabled = true;
+  $("message").className = "";
+  $("message").textContent = "Applying…";
+  try {
+    const body = {
+      preferredProvider: $("preferredProvider").value,
+      claude: { apiKey: $("claudeKey").value || undefined, model: $("claudeModel").value },
+      openai: { apiKey: $("openaiKey").value || undefined, model: $("openaiModel").value },
+      gemini: { apiKey: $("geminiKey").value || undefined, model: $("geminiModel").value },
+      ...extra,
+    };
+    const response = await fetch("/api/settings", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Settings could not be applied.");
+    $("claudeKey").value = ""; $("openaiKey").value = ""; $("geminiKey").value = "";
+    render(data.settings);
+    $("message").className = "ok";
+    $("message").textContent = "Applied. New runs will use these settings.";
+    return true;
+  } catch (error) {
+    $("message").className = "bad";
+    $("message").textContent = error.message;
+    return false;
+  } finally { button.disabled = false; }
+}
+
+$("save").addEventListener("click", () => save());
+
+for (const button of document.querySelectorAll("[data-remove]")) {
+  button.addEventListener("click", async () => {
+    const provider = button.dataset.remove;
+    if (!confirm(`Remove the configured ${provider} key from this running process?`)) return;
+    if ($("preferredProvider").value === provider) $("preferredProvider").value = "auto";
+    const removed = await save({ [provider]: { clearKey: true, model: $(`${provider}Model`).value } });
+    if (removed) $(`${provider}Test`).textContent = "Key removed.";
+  });
+}
+
+for (const button of document.querySelectorAll("[data-test]")) {
+  button.addEventListener("click", async () => {
+    const provider = button.dataset.test;
+    const target = $(`${provider}Test`);
+    const applied = await save();
+    if (!applied) { target.textContent = "Fix the settings error before testing."; return; }
+    button.disabled = true; target.textContent = "Checking model access…";
+    try {
+      const response = await fetch("/api/settings/test", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Connection failed.");
+      target.textContent = data.detail;
+    } catch (error) { target.textContent = error.message; }
+    finally { button.disabled = false; }
+  });
+}
+
+loadIntegrations();
+loadPulse();
+setInterval(loadPulse, 5_000);
+load().catch((error) => { $("message").className = "bad"; $("message").textContent = error.message; });
+</script>
+</body>
+</html>

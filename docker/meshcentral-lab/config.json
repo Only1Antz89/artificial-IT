@@ -1,0 +1,20 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Ylianst/MeshCentral/master/meshcentral-config-schema.json",
+  "settings": {
+    "cert": "meshcentral.local",
+    "port": 443,
+    "redirport": 0,
+    "exactports": true,
+    "wanonly": true,
+    "selfupdate": false,
+    "sessionrecording": true
+  },
+  "domains": {
+    "": {
+      "title": "AIT MeshCentral Lab",
+      "title2": "Isolated Docker endpoint",
+      "newAccounts": false,
+      "userConsentFlags": 0
+    }
+  }
+}

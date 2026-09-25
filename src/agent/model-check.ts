@@ -11,6 +11,7 @@
  * available instead of guessing a replacement. Guessing is what got us here.
  */
 import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
 import OpenAI from "openai";
 
 export interface ModelCheck {
@@ -102,6 +103,44 @@ export async function checkOpenAIModel(
     };
   } catch (err) {
     return skipped(model, "OpenAI", err);
+  }
+}
+
+/** Verify a Gemini model id against the account-visible models endpoint. */
+export async function checkGeminiModel(
+  model: string,
+  client = new GoogleGenAI({ apiKey: process.env["GEMINI_API_KEY"] }),
+): Promise<ModelCheck> {
+  try {
+    const ids: string[] = [];
+    const models = await client.models.list({ config: { pageSize: 100 } });
+    for await (const entry of models) {
+      if (entry.name) ids.push(entry.name.replace(/^models\//, ""));
+    }
+    if (ids.length === 0) {
+      return {
+        ok: true,
+        model,
+        skipped: "the models endpoint returned nothing",
+        message: `Could not list Gemini models; proceeding with "${model}".`,
+      };
+    }
+    if (ids.includes(model) || ids.includes(model.replace(/^models\//, ""))) {
+      return { ok: true, model, message: `Gemini model "${model}" is available.` };
+    }
+    const likely = ids.filter((id) => /^gemini-/.test(id)).sort();
+    const available = likely.length > 0 ? likely : ids;
+    return {
+      ok: false,
+      model,
+      available,
+      message:
+        `Gemini model "${model}" was not found on this account. ` +
+        `Available: ${available.slice(0, 8).join(", ")}${available.length > 8 ? ", …" : ""}. ` +
+        `Set GEMINI_MODEL to one of these.`,
+    };
+  } catch (err) {
+    return skipped(model, "Gemini", err);
   }
 }
 

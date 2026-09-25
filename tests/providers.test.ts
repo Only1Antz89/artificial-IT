@@ -19,6 +19,7 @@ function clearKeys() {
   vi.stubEnv("ANTHROPIC_API_KEY", "");
   vi.stubEnv("ANTHROPIC_AUTH_TOKEN", "");
   vi.stubEnv("OPENAI_API_KEY", "");
+  vi.stubEnv("GEMINI_API_KEY", "");
   vi.stubEnv("AIT_PROVIDER", "");
 }
 
@@ -29,7 +30,7 @@ describe("selecting a provider", () => {
     expect(selection.provider).toBe("offline");
     expect(selection.brain.name).toBe("heuristic");
     // The note is what stops an operator mistaking this for a model run.
-    expect(selection.note).toMatch(/no ANTHROPIC_API_KEY or OPENAI_API_KEY/);
+    expect(selection.note).toMatch(/no ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY/);
   });
 
   it("prefers Claude when its key is present", () => {
@@ -48,6 +49,15 @@ describe("selecting a provider", () => {
     expect(selection.brain.name).toBe("openai");
   });
 
+  it("uses Gemini when it is the configured provider", () => {
+    clearKeys();
+    vi.stubEnv("GEMINI_API_KEY", "gemini-test-key");
+    const selection = selectBrain("auto");
+    expect(selection.provider).toBe("gemini");
+    expect(selection.brain.name).toBe("gemini");
+    expect(selection.model).toBe("gemini-2.5-pro");
+  });
+
   it("honours an explicit model override", () => {
     clearKeys();
     vi.stubEnv("OPENAI_API_KEY", "sk-test");
@@ -59,6 +69,7 @@ describe("selecting a provider", () => {
     clearKeys();
     expect(() => selectBrain("claude")).toThrow(/ANTHROPIC_API_KEY/);
     expect(() => selectBrain("openai")).toThrow(/OPENAI_API_KEY/);
+    expect(() => selectBrain("gemini")).toThrow(/GEMINI_API_KEY/);
   });
 
   it("never silently substitutes a different provider than the one asked for", () => {
@@ -69,7 +80,7 @@ describe("selecting a provider", () => {
   });
 });
 
-describe("both providers share one technician persona", () => {
+describe("all model providers share one technician persona", () => {
   it("states the hard limits in the system prompt", () => {
     for (const limit of [
       "Passwords, credentials",

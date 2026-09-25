@@ -8,7 +8,7 @@
  *     want the model to state every field so a gap is visible.
  *   - No `.optional()`. OpenAI's strict structured-output mode requires every
  *     property to be required, so absence is expressed as `.nullable()`, which
- *     both providers accept.
+ *     all providers accept.
  *   - Step ids are absent. They are minted on our side so the model cannot
  *     reuse or collide with one.
  *

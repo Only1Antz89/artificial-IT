@@ -23,7 +23,7 @@ import { LocalDeviceSession, screenshotStrategy } from "./execution-plane/device
 import { checksFor, type HostPlatform } from "./agent/local-playbooks.js";
 import { hostPlatform, localDevice } from "./demo/local.js";
 import { selectBrain } from "./agent/select-brain.js";
-import { checkClaudeModel, checkOpenAIModel, withTimeout } from "./agent/model-check.js";
+import { checkClaudeModel, checkGeminiModel, checkOpenAIModel, withTimeout } from "./agent/model-check.js";
 
 export type CheckState = "ok" | "warn" | "fail";
 
@@ -212,7 +212,7 @@ async function portFree(port: number, forWhat: string): Promise<DoctorCheck> {
 async function providers(): Promise<DoctorCheck[]> {
   const out: DoctorCheck[] = [];
 
-  for (const provider of ["claude", "openai"] as const) {
+  for (const provider of ["claude", "openai", "gemini"] as const) {
     let selection;
     try {
       selection = selectBrain(provider);
@@ -225,10 +225,13 @@ async function providers(): Promise<DoctorCheck[]> {
       continue;
     }
 
+    const checkPromise = provider === "claude"
+      ? checkClaudeModel(selection.model)
+      : provider === "openai"
+        ? checkOpenAIModel(selection.model)
+        : checkGeminiModel(selection.model);
     const check = await withTimeout(
-      provider === "claude"
-        ? checkClaudeModel(selection.model)
-        : checkOpenAIModel(selection.model),
+      checkPromise,
       { ok: true, model: selection.model, skipped: "timed out", message: "Verification timed out." },
       10_000,
     );
@@ -240,7 +243,7 @@ async function providers(): Promise<DoctorCheck[]> {
       ...(check.ok
         ? {}
         : {
-            fix: `Set ${provider === "claude" ? "ANTHROPIC_MODEL" : "OPENAI_MODEL"} to one of the ids listed above.`,
+            fix: `Set ${provider === "claude" ? "ANTHROPIC_MODEL" : provider === "openai" ? "OPENAI_MODEL" : "GEMINI_MODEL"} to one of the ids listed above.`,
           }),
     });
   }

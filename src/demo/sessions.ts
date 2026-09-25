@@ -102,7 +102,7 @@ export function sessionForTarget(
       const device = remoteDevice();
       if (!config || !device) {
         throw new Error(
-          "No remote device is configured. Set MESHCENTRAL_URL, MESHCENTRAL_TOKEN, MESHCENTRAL_MESH_ID and MESHCENTRAL_DEVICE_ID.",
+          "No remote device is configured. Set the MeshCentral URL, operator authentication, mesh id and device id.",
         );
       }
       return new MeshCentralSession(device, config, {

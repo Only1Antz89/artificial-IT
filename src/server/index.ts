@@ -9,6 +9,8 @@
  *   GET  /                          the console
  *   GET  /api/scenarios             what can be run, simulated and local
  *   GET  /api/providers             which reasoning providers are usable
+ *   GET  /settings                  runtime provider options
+ *   GET/PUT /api/settings           secret-free settings view / runtime update
  *   POST /api/check                 ask the guardrails about a command
  *   POST /api/runs                  start a run; returns its id immediately
  *   GET  /api/runs/:id/events       server-sent events for that run
@@ -21,7 +23,7 @@ import { dirname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runTicket } from "../agent/loop.js";
 import { selectBrainChecked, selectBrain, type ProviderName } from "../agent/select-brain.js";
-import { checkClaudeModel, checkOpenAIModel, withTimeout } from "../agent/model-check.js";
+import { checkClaudeModel, checkGeminiModel, checkOpenAIModel, withTimeout } from "../agent/model-check.js";
 import { evaluate } from "../control-plane/policy/engine.js";
 import { newId } from "../contracts/index.js";
 import { KnowledgeStore, retrieve } from "../knowledge/index.js";
@@ -29,13 +31,14 @@ import { seedKnowledge } from "../demo/seed-knowledge.js";
 import { SCENARIOS, TICKETS, USERS, DEVICE_FIELDS } from "../demo/scenarios.js";
 import { LOCAL_SCENARIOS } from "../demo/run-local.js";
 import { localDangerTicket, localHealthTicket, localSession, hostPlatform } from "../demo/local.js";
-import { remoteTargetAvailable } from "../demo/adhoc.js";
 import { bridgeTargetAvailable } from "../demo/bridge-device.js";
 import {
   AD_HOC_TARGETS,
   adHocTicket,
   deriveSubject,
   localTargetAvailable,
+  remoteDevice,
+  remoteTargetAvailable,
   type AdHocRequest,
 } from "../demo/adhoc.js";
 import { governedSessionForTarget } from "../demo/sessions.js";
@@ -57,12 +60,17 @@ import {
 import { undoChange, undoableChanges } from "./undo.js";
 import { runQueue } from "../demo/run-queue.js";
 import type { DeviceSession } from "../execution-plane/device.js";
-import { meshConfigFromEnv } from "../execution-plane/remote.js";
+import { MeshCentralSession, meshConfigFromEnv } from "../execution-plane/remote.js";
 import {
   inspectOpenClawConfiguration,
   probeOpenClawIntegration,
 } from "../integrations/openclaw.js";
 import { createDemoPulseMonitor } from "../pulse/index.js";
+import {
+  applyRuntimeSettings,
+  runtimeSettings,
+  type RuntimeSettingsInput,
+} from "./runtime-settings.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const registry = new RunRegistry();
@@ -110,7 +118,37 @@ async function integrationSnapshot(probe: boolean): Promise<{
     process.env["ZENDESK_EMAIL"],
     process.env["ZENDESK_API_TOKEN"],
   ].every((value) => Boolean(value?.trim()));
-  const meshConfigured = Boolean(meshConfigFromEnv() && process.env["MESHCENTRAL_DEVICE_ID"]);
+  const meshConfig = meshConfigFromEnv();
+  const meshDevice = remoteDevice();
+  const meshConfigured = Boolean(meshConfig && meshDevice);
+
+  let meshState: IntegrationState = meshConfigured ? "configured" : "unavailable";
+  let meshDetail = meshConfigured
+    ? "Server, operator login, mesh and device are configured. Probe to verify a terminal session."
+    : "The tested relay adapter is present; live server/device settings are not configured.";
+  if (probe && meshConfig && meshDevice) {
+    const session = new MeshCentralSession(meshDevice, meshConfig, {
+      tenant_id: "demo-tenant",
+      task_id: newId("task"),
+      trace_id: newId("trace"),
+      device_id: meshDevice.device_id,
+      operator_id: "ait-integration-probe",
+      requested_at: new Date().toISOString(),
+    });
+    try {
+      const result = await session.exec("uname -s", 20_000);
+      if (result.exit_code !== 0) {
+        throw new Error(result.stderr.trim() || `remote command exited ${result.exit_code}`);
+      }
+      meshState = "live";
+      meshDetail = `Live terminal session and read-only command verified on ${meshDevice.hostname}.`;
+    } catch (error) {
+      meshState = "unavailable";
+      meshDetail = `Configured, but the live terminal probe failed: ${error instanceof Error ? error.message : "unknown error"}`;
+    } finally {
+      await session.end().catch(() => undefined);
+    }
+  }
 
   let openClaw: Awaited<ReturnType<typeof probeOpenClawIntegration>> | undefined;
   if (probe) openClaw = await probeOpenClawIntegration();
@@ -152,10 +190,8 @@ async function integrationSnapshot(probe: boolean): Promise<{
       {
         key: "meshcentral",
         label: "MeshCentral",
-        state: meshConfigured ? "configured" : "unavailable",
-        detail: meshConfigured
-          ? "Server, operator token, mesh and device are configured. A session opens only when a ticket needs it."
-          : "The tested relay adapter is present; live server/device settings are not configured.",
+        state: meshState,
+        detail: meshDetail,
         capability: "remote terminal · diagnostics · screen capture",
       },
       {
@@ -530,6 +566,8 @@ export interface ServerOptions {
    * shared state.
    */
   portalPort?: number;
+  /** Public browser URL when the portal's container port is remapped. */
+  portalPublicUrl?: string;
   workdir?: string;
 }
 
@@ -549,6 +587,10 @@ function isConsoleRoute(path: string): boolean {
     path === "/api/scenarios" ||
     path === "/api/knowledge" ||
     path === "/api/providers" ||
+    path === "/settings" ||
+    path === "/settings/" ||
+    path === "/api/settings" ||
+    path === "/api/settings/test" ||
     path === "/api/integrations" ||
     path.startsWith("/api/pulse") ||
     path === "/api/check" ||
@@ -591,6 +633,7 @@ export async function startServer(
   // listeners are bound, below.
   const consoleTemplate = readFileSync(join(here, "console", "index.html"), "utf8");
   let consoleHtml = consoleTemplate.replaceAll("__PORTAL_URL__", "/portal");
+  const settingsHtml = readFileSync(join(here, "settings", "index.html"), "utf8");
   const portalHtml = readFileSync(join(here, "portal", "index.html"), "utf8");
   const themeCss = readFileSync(join(here, "ui", "theme.css"), "utf8");
   const logoPositive = readFileSync(join(here, "ui", "momentum-logo-positive.png"));
@@ -642,6 +685,15 @@ export async function startServer(
       if (req.method === "GET" && path === "/") {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         res.end(surface === "portal" ? portalHtml : consoleHtml);
+        return;
+      }
+
+      if (req.method === "GET" && (path === "/settings" || path === "/settings/")) {
+        res.writeHead(200, {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store",
+        });
+        res.end(settingsHtml);
         return;
       }
 
@@ -800,6 +852,46 @@ export async function startServer(
 
       if (req.method === "GET" && path === "/api/providers") {
         json(res, 200, { providers: await providerStatus() });
+        return;
+      }
+
+      if (req.method === "GET" && path === "/api/settings") {
+        res.setHeader("Cache-Control", "no-store");
+        json(res, 200, { settings: runtimeSettings() });
+        return;
+      }
+
+      if (req.method === "PUT" && path === "/api/settings") {
+        const body = await readBody<RuntimeSettingsInput>(req);
+        if (!body) {
+          json(res, 400, { error: "Settings are required." });
+          return;
+        }
+        try {
+          const settings = applyRuntimeSettings(body);
+          res.setHeader("Cache-Control", "no-store");
+          json(res, 200, { settings });
+        } catch (error) {
+          json(res, 400, { error: error instanceof Error ? error.message : "invalid settings" });
+        }
+        return;
+      }
+
+      if (req.method === "POST" && path === "/api/settings/test") {
+        const body = await readBody<{ provider?: string }>(req);
+        if (body?.provider !== "claude" && body?.provider !== "openai" && body?.provider !== "gemini") {
+          json(res, 400, { error: "provider must be claude, openai or gemini" });
+          return;
+        }
+        const status = await providerStatusFor(body.provider);
+        res.setHeader("Cache-Control", "no-store");
+        json(
+          res,
+          status.state === "ready" || status.state === "unverified" ? 200 : 400,
+          status.state === "ready" || status.state === "unverified"
+            ? { provider: status.name, state: status.state, detail: status.detail }
+            : { error: status.detail },
+        );
         return;
       }
 
@@ -1054,9 +1146,23 @@ export async function startServer(
   }
 
   if (actualPortalPort !== undefined) {
+    const internalPortalUrl = `http://localhost:${actualPortalPort}/`;
+    const configuredPortalUrl = options.portalPublicUrl ?? process.env["AIT_PORTAL_PUBLIC_URL"];
+    let portalUrl = internalPortalUrl;
+    if (configuredPortalUrl?.trim()) {
+      const parsed = new URL(configuredPortalUrl);
+      if (
+        !["http:", "https:"].includes(parsed.protocol) ||
+        parsed.username ||
+        parsed.password
+      ) {
+        throw new Error("AIT_PORTAL_PUBLIC_URL must be an HTTP(S) URL without credentials.");
+      }
+      portalUrl = parsed.toString();
+    }
     consoleHtml = consoleTemplate.replaceAll(
       "__PORTAL_URL__",
-      `http://localhost:${actualPortalPort}/`,
+      portalUrl,
     );
   }
 
@@ -1256,31 +1362,7 @@ async function providerStatus(): Promise<
 > {
   const out: { name: string; state: string; detail: string; model?: string }[] = [];
 
-  for (const provider of ["claude", "openai"] as const) {
-    let selection;
-    try {
-      selection = selectBrain(provider);
-    } catch (err) {
-      out.push({
-        name: provider,
-        state: "not-configured",
-        detail: err instanceof Error ? err.message : "not configured",
-      });
-      continue;
-    }
-    const check = await withTimeout(
-      provider === "claude"
-        ? checkClaudeModel(selection.model)
-        : checkOpenAIModel(selection.model),
-      { ok: true, model: selection.model, skipped: "timed out", message: "Verification timed out." },
-    );
-    out.push({
-      name: provider,
-      model: selection.model,
-      state: check.skipped ? "unverified" : check.ok ? "ready" : "bad-model",
-      detail: check.message,
-    });
-  }
+  for (const provider of ["claude", "openai", "gemini"] as const) out.push(await providerStatusFor(provider));
 
   const offline = selectBrain("offline");
   out.push({
@@ -1290,4 +1372,34 @@ async function providerStatus(): Promise<
     detail: "Deterministic playbook engine. No network, no API key.",
   });
   return out;
+}
+
+async function providerStatusFor(
+  provider: "claude" | "openai" | "gemini",
+): Promise<{ name: string; state: string; detail: string; model?: string }> {
+  let selection;
+  try {
+    selection = selectBrain(provider);
+  } catch (err) {
+    return {
+      name: provider,
+      state: "not-configured",
+      detail: err instanceof Error ? err.message : "not configured",
+    };
+  }
+  const checkPromise = provider === "claude"
+    ? checkClaudeModel(selection.model)
+    : provider === "openai"
+      ? checkOpenAIModel(selection.model)
+      : checkGeminiModel(selection.model);
+  const check = await withTimeout(
+    checkPromise,
+    { ok: true, model: selection.model, skipped: "timed out", message: "Verification timed out." },
+  );
+  return {
+    name: provider,
+    model: selection.model,
+    state: check.skipped ? "unverified" : check.ok ? "ready" : "bad-model",
+    detail: check.message,
+  };
 }

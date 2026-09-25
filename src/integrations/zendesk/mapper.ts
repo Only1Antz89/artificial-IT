@@ -159,16 +159,18 @@ export function renderInternalNote(run: Run): string {
   const lines: string[] = [];
   const doc = run.documentation;
 
-  lines.push(`**AIT — automated triage**`);
+  lines.push(`# ==AIT — automated triage==`);
   lines.push("");
   if (doc) {
+    lines.push(`## Outcome`);
     lines.push(`**Root cause:** ${doc.root_cause}`);
     lines.push(`**Resolution:** ${doc.resolution}`);
     lines.push("");
   }
 
   if (run.diagnosis) {
-    lines.push(`**Diagnosis** (${run.diagnosis.confidence} confidence)`);
+    lines.push(`## Diagnosis`);
+    lines.push(`*Confidence: ${run.diagnosis.confidence}*`);
     run.diagnosis.hypotheses.forEach((h, i) => {
       const lead = i === run.diagnosis!.leading_index ? " ← pursued" : "";
       lines.push(`- ${h.statement} (${h.confidence})${lead}`);
@@ -176,7 +178,7 @@ export function renderInternalNote(run: Run): string {
     lines.push("");
   }
 
-  lines.push(`**Steps taken**`);
+  lines.push(`## Steps taken`);
   if (run.results.length === 0) {
     lines.push("- None.");
   }
@@ -201,15 +203,17 @@ export function renderInternalNote(run: Run): string {
   lines.push("");
 
   if (run.knowledge_used.length > 0) {
-    lines.push(`**Prior tickets consulted:** ${run.knowledge_used.join(", ")}`);
+    lines.push(`## Prior knowledge`);
+    lines.push(`**Tickets consulted:** ${run.knowledge_used.join(", ")}`);
     lines.push("");
   }
 
   if (run.escalation?.triggered) {
-    lines.push(`**Escalated to ${run.escalation.route_to}** (${run.escalation.urgency})`);
+    lines.push(`## ==Escalated to ${run.escalation.route_to}==`);
+    lines.push(`**Urgency:** ${run.escalation.urgency}`);
     lines.push(`_${run.escalation.ask}_`);
     lines.push("");
-    lines.push(`**Handover**`);
+    lines.push(`### Handover`);
     for (const [heading, items] of [
       ["What we know", run.escalation.handover.what_we_know],
       ["What we tried", run.escalation.handover.what_we_tried],
@@ -224,11 +228,12 @@ export function renderInternalNote(run: Run): string {
   }
 
   if (doc?.prevention.length) {
-    lines.push(`**Prevention**`);
+    lines.push(`## Prevention`);
     for (const p of doc.prevention) lines.push(`- ${p}`);
     lines.push("");
   }
 
+  lines.push(`### ++Audit reference++`);
   lines.push(`_Run ${run.run_id} · trace ${run.trace_id} · ${run.results.length} step(s) · ${run.audit.length} audit entries_`);
   return lines.join("\n");
 }

@@ -46,6 +46,9 @@ describe("the portal listener", () => {
     "/api/scenarios",
     "/api/knowledge",
     "/api/providers",
+    "/settings",
+    "/api/settings",
+    "/api/settings/test",
     "/api/integrations",
     "/api/pulse",
     "/api/pulse/run",
@@ -113,6 +116,8 @@ describe("the console listener", () => {
   it("serves the technician API", async () => {
     expect((await fetch(`${consoleBase}/api/scenarios`)).status).toBe(200);
     expect((await fetch(`${consoleBase}/api/desk`)).status).toBe(200);
+    expect((await fetch(`${consoleBase}/settings`)).status).toBe(200);
+    expect((await fetch(`${consoleBase}/api/settings`)).status).toBe(200);
   });
 });
 

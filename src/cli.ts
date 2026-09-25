@@ -30,7 +30,7 @@ import { governedSessionForTarget } from "./demo/sessions.js";
 import { selectBrain } from "./agent/select-brain.js";
 import { runDoctor, type CheckState } from "./doctor.js";
 import * as nodeFs from "node:fs";
-import { checkClaudeModel, checkOpenAIModel, withTimeout } from "./agent/model-check.js";
+import { checkClaudeModel, checkGeminiModel, checkOpenAIModel, withTimeout } from "./agent/model-check.js";
 import { positionalArgs } from "./cli-args.js";
 
 const c = {
@@ -382,7 +382,7 @@ async function cmdProviders(): Promise<void> {
 
   const rows: [string, string, string][] = [];
 
-  for (const provider of ["claude", "openai"] as const) {
+  for (const provider of ["claude", "openai", "gemini"] as const) {
     let selection;
     try {
       selection = selectBrain(provider);
@@ -391,10 +391,13 @@ async function cmdProviders(): Promise<void> {
       continue;
     }
 
+    const checkPromise = provider === "claude"
+      ? checkClaudeModel(selection.model)
+      : provider === "openai"
+        ? checkOpenAIModel(selection.model)
+        : checkGeminiModel(selection.model);
     const check = await withTimeout(
-      provider === "claude"
-        ? checkClaudeModel(selection.model)
-        : checkOpenAIModel(selection.model),
+      checkPromise,
       {
         ok: true,
         model: selection.model,
@@ -520,7 +523,7 @@ ${c.bold("AIT")} — AI IT technician
   ait reset                   clear evidence and learned knowledge
   ait demo [scenario...]      run the simulated demo (all scenarios by default)
   ait local [scenario]        run against THIS machine (local-health | local-danger)
-  ait demo --provider openai  force a reasoning provider (claude|openai|offline)
+  ait demo --provider gemini force a reasoning provider (claude|openai|gemini|offline)
   ait scenarios               list every scenario
   ait providers               show which providers are configured and verified
   ait check "<command>"       ask the guardrails about a command without running it
@@ -529,7 +532,7 @@ ${c.bold("AIT")} — AI IT technician
   ait serve --single-port     both halves on one port, portal at /portal
 
 Providers are chosen by AIT_PROVIDER, or automatically from whichever of
-ANTHROPIC_API_KEY / OPENAI_API_KEY is set. With neither, AIT runs its
+ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY is set. With none, AIT runs its
 deterministic playbook engine so the demo still works offline.
 `);
 }

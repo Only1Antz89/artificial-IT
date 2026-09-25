@@ -1,11 +1,12 @@
 /**
  * Choosing a brain.
  *
- * Three providers, one interface. The choice is a deployment decision, not a
+ * Four providers, one interface. The choice is a deployment decision, not a
  * code change:
  *
  *   AIT_PROVIDER=claude     Anthropic API      (ANTHROPIC_API_KEY)
  *   AIT_PROVIDER=openai     OpenAI API         (OPENAI_API_KEY)
+ *   AIT_PROVIDER=gemini     Google Gemini API  (GEMINI_API_KEY)
  *   AIT_PROVIDER=offline    deterministic playbooks, no network
  *   AIT_PROVIDER=auto       (default) first configured of the above
  *
@@ -16,12 +17,13 @@
  * which one they got.
  */
 import type { Brain } from "./brain.js";
-import { checkClaudeModel, checkOpenAIModel, withTimeout, type ModelCheck } from "./model-check.js";
+import { checkClaudeModel, checkGeminiModel, checkOpenAIModel, withTimeout, type ModelCheck } from "./model-check.js";
 import { ClaudeBrain, claudeAvailable, DEFAULT_CLAUDE_MODEL } from "./claude-brain.js";
+import { DEFAULT_GEMINI_MODEL, GeminiBrain, geminiAvailable } from "./gemini-brain.js";
 import { HeuristicBrain } from "./heuristic-brain.js";
 import { DEFAULT_OPENAI_MODEL, OpenAIBrain, openaiAvailable } from "./openai-brain.js";
 
-export type ProviderName = "claude" | "openai" | "offline" | "auto";
+export type ProviderName = "claude" | "openai" | "gemini" | "offline" | "auto";
 
 export interface BrainSelection {
   brain: Brain;
@@ -45,10 +47,13 @@ export async function selectBrainChecked(
   const selection = selectBrain(requested);
   if (selection.provider === "offline") return selection;
 
+  const checkPromise = selection.provider === "claude"
+    ? checkClaudeModel(selection.model)
+    : selection.provider === "openai"
+      ? checkOpenAIModel(selection.model)
+      : checkGeminiModel(selection.model);
   const check = await withTimeout(
-    selection.provider === "claude"
-      ? checkClaudeModel(selection.model)
-      : checkOpenAIModel(selection.model),
+    checkPromise,
     {
       ok: true,
       model: selection.model,
@@ -89,14 +94,21 @@ export function selectBrain(requested?: ProviderName): BrainSelection {
       }
       return openai("selected explicitly");
 
+    case "gemini":
+      if (!geminiAvailable()) {
+        throw new Error("AIT_PROVIDER=gemini but no GEMINI_API_KEY is set.");
+      }
+      return gemini("selected explicitly");
+
     case "offline":
       return offline("selected explicitly");
 
     case "auto":
       if (claudeAvailable()) return claude("auto-selected: ANTHROPIC_API_KEY present");
       if (openaiAvailable()) return openai("auto-selected: OPENAI_API_KEY present");
+      if (geminiAvailable()) return gemini("auto-selected: GEMINI_API_KEY present");
       return offline(
-        "auto-selected: no ANTHROPIC_API_KEY or OPENAI_API_KEY found, so reasoning is served by the deterministic playbook engine",
+        "auto-selected: no ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY found, so reasoning is served by the deterministic playbook engine",
       );
 
     default:
@@ -118,6 +130,15 @@ function openai(note: string): BrainSelection {
     brain: new OpenAIBrain(),
     provider: "openai",
     model: process.env["OPENAI_MODEL"] ?? DEFAULT_OPENAI_MODEL,
+    note,
+  };
+}
+
+function gemini(note: string): BrainSelection {
+  return {
+    brain: new GeminiBrain(),
+    provider: "gemini",
+    model: process.env["GEMINI_MODEL"] ?? DEFAULT_GEMINI_MODEL,
     note,
   };
 }

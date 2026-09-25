@@ -6,8 +6,8 @@
  * so the client is exercised against the message flow it will meet in
  * production rather than against a mock of itself.
  *
- * `ws` is a devDependency used only here; the client itself uses Node's built-in
- * WebSocket and adds no runtime dependency.
+ * `ws` is also used by the client when MeshCentral password authentication
+ * requires an x-meshauth upgrade header.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createServer, type Server } from "node:http";
@@ -57,6 +57,8 @@ interface Stub {
   rejectLogin: boolean;
   /** Raw command frames received by the terminal relay. */
   terminalInput: string[];
+  /** Password-auth upgrade header received by the control channel. */
+  lastMeshAuth?: string;
 }
 
 async function startStub(): Promise<Stub> {
@@ -76,6 +78,8 @@ async function startStub(): Promise<Stub> {
       const url = new URL(req.url ?? "/", "http://localhost");
 
       if (url.pathname === "/control.ashx") {
+        const meshAuth = req.headers["x-meshauth"];
+        stub.lastMeshAuth = Array.isArray(meshAuth) ? meshAuth[0] : meshAuth;
         ws.on("message", (raw) => {
           const msg = JSON.parse(String(raw));
           if (msg.action === "authcookie") {
@@ -130,6 +134,9 @@ async function startStub(): Promise<Stub> {
       stub.rejectLogin = v;
     },
     terminalInput: stub.terminalInput,
+    get lastMeshAuth() {
+      return stub.lastMeshAuth;
+    },
     close: () =>
       new Promise<void>((resolve) => {
         // Open WebSockets keep `http.close()` waiting forever, so drop them
@@ -220,6 +227,24 @@ describe("the tunnel handshake", () => {
 
     await s.end();
     expect(s.status).toBe("ended");
+  });
+
+  it("supports MeshCentral login-token username/password authentication", async () => {
+    const s = new MeshCentralSession(
+      DEVICE,
+      {
+        serverUrl: `http://127.0.0.1:${stub.port}`,
+        operatorUsername: "~t:ait-lab",
+        operatorPassword: "token-password",
+        meshId: "mesh//x",
+      },
+      request(),
+    );
+    await s.exec("uptime");
+    expect(stub.lastMeshAuth).toBe(
+      `${Buffer.from("~t:ait-lab").toString("base64")},${Buffer.from("token-password").toString("base64")}`,
+    );
+    await s.end();
   });
 
   it("reuses one tunnel across commands rather than redialling each time", async () => {
@@ -398,6 +423,11 @@ describe("configuration and addressing", () => {
     process.env["MESHCENTRAL_TOKEN"] = "t";
     process.env["MESHCENTRAL_MESH_ID"] = "m";
     expect(meshConfigFromEnv()?.serverUrl).toBe("https://mesh.test");
+
+    delete process.env["MESHCENTRAL_TOKEN"];
+    process.env["MESHCENTRAL_USER"] = "~t:ait-lab";
+    process.env["MESHCENTRAL_PASSWORD"] = "token-password";
+    expect(meshConfigFromEnv()?.operatorUsername).toBe("~t:ait-lab");
 
     process.env = saved;
   });
