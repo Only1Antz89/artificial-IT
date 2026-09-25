@@ -9,15 +9,27 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { runTicket } from "../src/agent/loop.js";
+import { HeuristicBrain } from "../src/agent/heuristic-brain.js";
 import { runLocal } from "../src/demo/run-local.js";
-import { hostPlatform, localDangerTicket, localDevice } from "../src/demo/local.js";
+import {
+  hostPlatform,
+  localDangerTicket,
+  localDevice,
+  localHealthTicket,
+} from "../src/demo/local.js";
 import {
   checksFor,
   parseDiskUsage,
   parseMemoryUsage,
   parseWindowsDisk,
 } from "../src/agent/local-playbooks.js";
-import { pngDimensions, splitArgv } from "../src/execution-plane/device.js";
+import {
+  pngDimensions,
+  splitArgv,
+  type DeviceSession,
+} from "../src/execution-plane/device.js";
+import { KnowledgeStore } from "../src/knowledge/index.js";
 
 let workdir: string;
 beforeEach(() => {
@@ -267,4 +279,58 @@ describeIfSupported("running against this machine", () => {
       expect(commands.some((c) => /passwd|rm -rf/i.test(c))).toBe(true);
     }
   });
+});
+
+describeIfSupported("incomplete local diagnostics", () => {
+  function unavailableSession(mode: "non-zero" | "throw"): DeviceSession {
+    const device = localDevice();
+    const required = platform === "windows" ? "systeminfo" : "uname";
+    return {
+      device,
+      sessionId: `unavailable-${mode}`,
+      async capabilities() {
+        return {
+          platform: device.platform,
+          availableCommands: [required],
+          canCapture: false,
+          captureUnavailableReason: "test session has no display",
+        };
+      },
+      async exec(command) {
+        if (mode === "throw") throw new Error("endpoint command channel unavailable");
+        return {
+          command,
+          exit_code: 127,
+          stdout: "",
+          stderr: `${required}: command unavailable`,
+          duration_ms: 1,
+          truncated: false,
+        };
+      },
+      async capture() {
+        throw new Error("capture unavailable");
+      },
+      async end() {},
+    };
+  }
+
+  it.each(["non-zero", "throw"] as const)(
+    "escalates rather than declaring a healthy machine when a required check returns %s",
+    async (mode) => {
+      const run = await runTicket({
+        ticket: localHealthTicket(),
+        brain: new HeuristicBrain(),
+        knowledge: new KnowledgeStore(join(workdir, `kb-${mode}.jsonl`)),
+        session: unavailableSession(mode),
+        evidenceRoot: workdir,
+        stepBudget: 4,
+        learn: false,
+      });
+
+      expect(run.results.some((result) => result.outcome === "failed")).toBe(true);
+      expect(run.status).toBe("escalated");
+      expect(run.documentation?.root_cause).not.toMatch(/no fault found/i);
+      expect(run.documentation?.user_reply).not.toMatch(/everything came back within normal range/i);
+    },
+  );
 });

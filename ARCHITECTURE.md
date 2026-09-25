@@ -142,6 +142,12 @@ any step whose verdict is not `allow` — belt-and-braces against a future calle
 that forgets to check — and records failures honestly. Nothing smooths over a
 non-zero exit code, because the write-up depends on the results being true.
 
+Desktop input is an optional `DeviceSession.control()` capability rather than a
+parallel escape hatch. A `ui_action` receives the same policy verdict as every
+other step and always requires technician approval. The executor preserves the
+provider receipt, then the reasoning loop must re-run an independent diagnostic
+before it can resolve the ticket.
+
 `annotate.ts` renders a technician's marks — a box round the fault, an arrow to
 the button, a caption — as SVG over the capture. SVG rather than raster because
 it composes without an image library, stays legible when Zendesk scales it, and
@@ -178,7 +184,7 @@ actually approved and carried out. A run where everything was *refused* still
 produces an entry — knowing that a class of ticket always needs a human is worth
 remembering.
 
-### Integrations — `src/integrations/zendesk/`
+### Integrations — `src/integrations/`
 
 Everything help-desk-specific is confined here. The agent never sees a Zendesk
 id, status or custom field — it sees a `Ticket`. Adding a second help desk means
@@ -186,6 +192,26 @@ adding a sibling to `mapper.ts`, nothing more.
 
 `ZendeskClient` is an interface with an HTTP implementation and an in-memory
 one, so a demo run and a live run take the same code path through the agent.
+
+`openclaw.ts` is the governed client for the alternative project's curated
+OpenClaw routes.
+It probes UI-TARS Desktop readiness and invokes actions only with caller-supplied
+run-scoped authority, fence and cancellation context. `openclaw-session.ts`
+composes that desktop-control channel with any normal `DeviceSession`, including
+MeshCentral. Plain HTTP is accepted only on loopback; errors never include an
+upstream response body that could echo a scoped token.
+
+### Proactive pulse — `src/pulse/`
+
+Pulse is observation, not a hidden remediation loop. Manual and scheduled runs
+open ordinary device sessions, put every command through the same read-only
+policy engine and evidence store, then classify endpoint, service and mobile
+posture. A finding may open a normal service-desk ticket; any change on that
+ticket still passes through the usual approval, audit and escalation path.
+
+The bundled fleet is deterministic and each result says `source: simulated`.
+A live adapter supplies the same `DeviceSession` and probe contract; it does not
+need a separate privileged scheduler.
 
 ### Console — `src/server/`
 

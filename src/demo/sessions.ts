@@ -15,6 +15,7 @@ import {
   makeMacFullDiskDevice,
   makeWindowsDnsDevice,
   makeWindowsPrintDevice,
+  makeWindowsWifiDevice,
   makeWindowsVpnDevice,
 } from "./devices.js";
 
@@ -36,6 +37,8 @@ export function sessionForTarget(
       return makeMacFullDiskDevice();
     case "simulated-windows-field-laptop":
       return makeWindowsVpnDevice();
+    case "simulated-windows-wifi-disabled":
+      return makeWindowsWifiDevice();
 
     case "remote-device": {
       const config = meshConfigFromEnv();

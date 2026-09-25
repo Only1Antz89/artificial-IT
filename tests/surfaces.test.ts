@@ -46,6 +46,9 @@ describe("the portal listener", () => {
     "/api/scenarios",
     "/api/knowledge",
     "/api/providers",
+    "/api/integrations",
+    "/api/pulse",
+    "/api/pulse/run",
     "/api/runs",
     "/api/runs/anything/events",
   ];

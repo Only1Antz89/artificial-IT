@@ -13,7 +13,12 @@
  */
 export interface PlaybookStep {
   intent: string;
+  /** Commands are the default; UI actions remain explicit and always gated. */
+  kind?: "command" | "ui_action";
+  /** Command text, or the governed desktop capability name for a UI action. */
   command: string;
+  /** Arguments passed to the desktop provider when `kind` is `ui_action`. */
+  arguments?: Record<string, unknown>;
   mutating: boolean;
   rollback?: string;
   /** A command that genuinely reverses this step, where one exists. */
@@ -177,6 +182,65 @@ export const PLAYBOOKS: Playbook[] = [
     prevention: [
       "Add the sending domain to the mail gateway block list.",
       "Re-run targeted phishing simulation for the affected team.",
+    ],
+  },
+  {
+    id: "pb.wifi-disabled",
+    category: "connectivity",
+    match:
+      /\b(wi-?fi|wireless)\b[^\n]{0,40}\b(turned\s+off|switched\s+off|disabled|greyed\s+out|won'?t\s+turn\s+on|cannot\s+turn\s+on)\b|\bairplane\s+mode\b/i,
+    hypotheses: [
+      {
+        statement:
+          "The Wi-Fi interface is disabled in Windows Settings, so the laptop cannot join any wireless network.",
+        confidence: "medium",
+      },
+      {
+        statement: "Airplane mode is suppressing the wireless radio.",
+        confidence: "low",
+      },
+      {
+        statement: "The wireless adapter or its driver is unavailable.",
+        confidence: "low",
+      },
+    ],
+    diagnostics: {
+      windows: [
+        {
+          intent: "Confirm whether Windows reports the Wi-Fi interface as disabled",
+          command: "netsh interface show interface",
+          mutating: false,
+          faultSignal: "Disabled",
+        },
+      ],
+      macos: NONE,
+      linux: NONE,
+      unknown: NONE,
+    },
+    fixes: {
+      windows: [
+        {
+          kind: "ui_action",
+          intent: "Open Windows Settings and turn Wi-Fi on",
+          command: "computer.execute_instruction",
+          arguments: {
+            instruction: "Open Network & internet settings and turn Wi-Fi on.",
+            target: "wifi",
+            value: true,
+          },
+          mutating: true,
+          rollback: "Turn the Wi-Fi toggle off again in Windows Settings.",
+        },
+      ],
+      macos: NONE,
+      linux: NONE,
+      unknown: NONE,
+    },
+    rootCause:
+      "The Wi-Fi interface was disabled in Windows Settings, preventing the device from joining a wireless network.",
+    prevention: [
+      "Surface wireless-radio state in the endpoint health pulse.",
+      "Keep a technician-approved desktop action for restoring the Wi-Fi toggle.",
     ],
   },
   {

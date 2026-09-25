@@ -111,6 +111,8 @@ export async function runTicket(options: RunOptions): Promise<Run> {
           platform: capabilities.platform,
           tools: capabilities.availableCommands.length,
           can_capture: capabilities.canCapture,
+          can_control: capabilities.canControl ?? false,
+          control_provider: capabilities.controlProvider ?? null,
         }
       : null,
   });

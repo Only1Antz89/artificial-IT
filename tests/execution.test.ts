@@ -18,7 +18,11 @@ import {
   InteractiveGate,
   PolicyBoundGate,
 } from "../src/control-plane/approvals.js";
-import { makeWindowsDnsDevice, WIN_LAPTOP } from "../src/demo/devices.js";
+import {
+  makeWindowsDnsDevice,
+  makeWindowsWifiDevice,
+  WIN_LAPTOP,
+} from "../src/demo/devices.js";
 import type { PlanStep, PolicyVerdict } from "../src/contracts/index.js";
 
 let workdir: string;
@@ -80,6 +84,44 @@ describe("the executor refuses anything not cleared", () => {
 });
 
 describe("the executor reports the truth", () => {
+  it("performs an approved UI action and keeps the provider receipt", async () => {
+    const session = makeWindowsWifiDevice();
+    const result = await executeStep(
+      step({
+        kind: "ui_action",
+        intent: "Turn Wi-Fi on in Settings",
+        payload: {
+          action: "computer.execute_instruction",
+          arguments: { target: "wifi", value: true },
+        },
+        mutating: true,
+      }),
+      ALLOW,
+      { session, evidence },
+    );
+
+    expect(result.outcome).toBe("success");
+    expect(session.state["wifi_enabled"]).toBe(true);
+    expect(result.artifacts[0]?.content_type).toBe("application/json");
+    expect(result.observation).toMatch(/switched Wi-Fi on/i);
+  });
+
+  it("fails honestly when no desktop-control backend is attached", async () => {
+    const result = await executeStep(
+      step({
+        kind: "ui_action",
+        intent: "Click a setting",
+        payload: { action: "mouse.click", arguments: { x: 1, y: 1 } },
+        mutating: true,
+      }),
+      ALLOW,
+      { session: makeWindowsDnsDevice(), evidence },
+    );
+
+    expect(result.outcome).toBe("failed");
+    expect(result.error).toMatch(/does not support mouse\.click/i);
+  });
+
   it("marks a non-zero exit as failed and keeps the output", async () => {
     const result = await executeStep(
       step({ payload: { command: "nslookup intranet.corp.local" } }),

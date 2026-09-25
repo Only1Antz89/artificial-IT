@@ -56,6 +56,12 @@ import {
 import { undoChange, undoableChanges } from "./undo.js";
 import { runQueue } from "../demo/run-queue.js";
 import type { DeviceSession } from "../execution-plane/device.js";
+import { meshConfigFromEnv } from "../execution-plane/remote.js";
+import {
+  inspectOpenClawConfiguration,
+  probeOpenClawIntegration,
+} from "../integrations/openclaw.js";
+import { createDemoPulseMonitor } from "../pulse/index.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const registry = new RunRegistry();
@@ -78,6 +84,111 @@ const UNDO_WINDOW_MS = 15 * 60 * 1000;
  * looked at now" for ten minutes is worse service than escalating in two.
  */
 const PORTAL_APPROVAL_WINDOW_MS = 2 * 60 * 1000;
+
+type IntegrationState = "live" | "configured" | "simulated" | "unavailable";
+
+interface IntegrationStatus {
+  key: string;
+  label: string;
+  state: IntegrationState;
+  detail: string;
+  capability: string;
+}
+
+/**
+ * One truthful view of the demo's adapters. "Implemented" is not reported as
+ * "live": a connector turns green only after an actual probe answers.
+ */
+async function integrationSnapshot(probe: boolean): Promise<{
+  checkedAt: string;
+  probed: boolean;
+  components: IntegrationStatus[];
+}> {
+  const zendeskConfigured = [
+    process.env["ZENDESK_SUBDOMAIN"],
+    process.env["ZENDESK_EMAIL"],
+    process.env["ZENDESK_API_TOKEN"],
+  ].every((value) => Boolean(value?.trim()));
+  const meshConfigured = Boolean(meshConfigFromEnv() && process.env["MESHCENTRAL_DEVICE_ID"]);
+
+  let openClaw: Awaited<ReturnType<typeof probeOpenClawIntegration>> | undefined;
+  if (probe) openClaw = await probeOpenClawIntegration();
+  const openClawConfiguration = (() => {
+    try {
+      return inspectOpenClawConfiguration();
+    } catch (error) {
+      return {
+        state: "invalid" as const,
+        message: error instanceof Error ? error.message : "invalid OpenClaw configuration",
+      };
+    }
+  })();
+
+  const openClawState: IntegrationState = openClaw
+    ? openClaw.state === "live"
+      ? "live"
+      : openClaw.state === "configured"
+        ? "configured"
+        : "unavailable"
+    : openClawConfiguration.state === "configured"
+      ? "configured"
+      : "unavailable";
+  const desktopLive = openClaw?.state === "live" && openClaw.desktopRpcReady;
+
+  return {
+    checkedAt: new Date().toISOString(),
+    probed: probe,
+    components: [
+      {
+        key: "ticketing",
+        label: "Ticketing",
+        state: zendeskConfigured ? "configured" : "simulated",
+        detail: zendeskConfigured
+          ? "Zendesk credentials are present; the queue adapter is ready to connect."
+          : "In-memory Zendesk-compatible queue with real write-back behaviour.",
+        capability: "intake · replies · attachments · escalation",
+      },
+      {
+        key: "meshcentral",
+        label: "MeshCentral",
+        state: meshConfigured ? "configured" : "unavailable",
+        detail: meshConfigured
+          ? "Server, operator token, mesh and device are configured. A session opens only when a ticket needs it."
+          : "The tested relay adapter is present; live server/device settings are not configured.",
+        capability: "remote terminal · diagnostics · screen capture",
+      },
+      {
+        key: "openclaw",
+        label: "OpenClaw gateway",
+        state: openClawState,
+        detail:
+          openClaw?.message ??
+          (openClawConfiguration.state === "configured"
+            ? "Configured but not probed yet."
+            : openClawConfiguration.state === "invalid"
+              ? openClawConfiguration.message
+              : "The governed bridge client is present; gateway URL/token are not configured."),
+        capability: "runtime authority · fencing · cancellation",
+      },
+      {
+        key: "ui-tars",
+        label: "UI-TARS Desktop",
+        state: desktopLive ? "live" : "simulated",
+        detail: desktopLive
+          ? "The governed desktop RPC bridge answered and is ready for run-scoped actions."
+          : "The attended Wi-Fi demo uses the same action shape against a stateful simulated desktop; live RPC remains clearly labelled unavailable.",
+        capability: "approved desktop action · receipt · terminal verification",
+      },
+      {
+        key: "pulse",
+        label: "AIT Pulse",
+        state: "simulated",
+        detail: "Endpoint, service and mobile posture checks run through policy and retain evidence.",
+        capability: "manual · scheduled · proactive ticket",
+      },
+    ],
+  };
+}
 
 /* ------------------------------------------------------------------ *
  * Helpers
@@ -112,6 +223,8 @@ interface StartRunBody {
   provider?: ProviderName;
   /** The desk ticket this run is working, when it came from the portal. */
   deskTicketId?: string;
+  /** Pulse-created work should escalate on missing context, not question a user who did not raise it. */
+  proactive?: boolean;
 }
 
 /**
@@ -279,6 +392,11 @@ function startRun(body: StartRunBody, workdir: string): RunSession {
           platform: caps.platform,
           tools: caps.availableCommands.length,
           canCapture: caps.canCapture,
+          canControl: caps.canControl ?? false,
+          ...(caps.controlProvider ? { controlProvider: caps.controlProvider } : {}),
+          ...(caps.controlUnavailableReason
+            ? { controlNote: caps.controlUnavailableReason }
+            : {}),
           ...(caps.captureUnavailableReason
             ? { captureNote: caps.captureUnavailableReason }
             : {}),
@@ -297,7 +415,9 @@ function startRun(body: StartRunBody, workdir: string): RunSession {
         // not to the technician watching. It is delivered to their portal; the
         // console shows it as outstanding and a technician may still answer on
         // their behalf, as they would if they picked up the phone.
-        askUser: deskId ? deskQuestion(session, deskId) : session.ask(),
+        ...(body.proactive
+          ? {}
+          : { askUser: deskId ? deskQuestion(session, deskId) : session.ask() }),
         evidenceRoot: workdir,
         stepBudget: 10,
         onEvent: (event) => {
@@ -420,6 +540,8 @@ function isConsoleRoute(path: string): boolean {
     path === "/api/scenarios" ||
     path === "/api/knowledge" ||
     path === "/api/providers" ||
+    path === "/api/integrations" ||
+    path.startsWith("/api/pulse") ||
     path === "/api/check" ||
     path === "/api/queue" ||
     path.startsWith("/api/runs")
@@ -450,6 +572,8 @@ export async function startServer(
       : portOrOptions;
   const port = options.port ?? Number(process.env["PORT"] ?? 3000);
   const workdir = options.workdir ?? workdirArg;
+  const pulse = createDemoPulseMonitor({ evidenceRoot: join(workdir, "pulse") });
+  const pulseTickets = new Map<string, string>();
 
   // The console links to the portal, and where the portal lives depends on how
   // this was started - and on which port the OS actually handed out, when the
@@ -669,6 +793,94 @@ export async function startServer(
         return;
       }
 
+      if (req.method === "GET" && path === "/api/integrations") {
+        json(res, 200, await integrationSnapshot(url.searchParams.get("probe") === "1"));
+        return;
+      }
+
+      if (req.method === "GET" && path === "/api/pulse") {
+        json(res, 200, { state: pulse.state(), history: pulse.history() });
+        return;
+      }
+
+      if (req.method === "POST" && path === "/api/pulse/run") {
+        json(res, 200, { run: await pulse.runNow(), state: pulse.state() });
+        return;
+      }
+
+      if (req.method === "POST" && path === "/api/pulse/control") {
+        const body = await readBody<{ enabled?: boolean; intervalMs?: number }>(req);
+        if (body?.enabled) {
+          const interval = body.intervalMs ?? 30_000;
+          if (!Number.isInteger(interval) || interval < 5_000 || interval > 3_600_000) {
+            json(res, 400, { error: "intervalMs must be between 5000 and 3600000" });
+            return;
+          }
+          json(res, 200, { state: pulse.start(interval) });
+        } else {
+          json(res, 200, { state: pulse.stop() });
+        }
+        return;
+      }
+
+      if (req.method === "POST" && path === "/api/pulse/ticket") {
+        const body = await readBody<{
+          runId?: string;
+          targetId?: string;
+          provider?: ProviderName;
+        }>(req);
+        const run = pulse.history().find((entry) => entry.run_id === body?.runId);
+        const target = run?.targets.find((entry) => entry.target_id === body?.targetId);
+        const alerts = run?.alerts.filter((entry) => entry.target_id === body?.targetId) ?? [];
+        if (!run || !target || alerts.length === 0) {
+          json(res, 404, { error: "no actionable pulse finding matches that run and target" });
+          return;
+        }
+
+        const key = `${run.run_id}:${target.target_id}`;
+        const existingId = pulseTickets.get(key);
+        const existing = existingId ? desk.get(existingId) : undefined;
+        if (existing) {
+          json(res, 200, { ticket: existing, duplicate: true });
+          return;
+        }
+
+        const targetMap: Record<string, AdHocRequest["target"]> = {
+          "endpoint-lon-lt-2211": "simulated-windows-laptop",
+          "service-print-man-dt-3480": "simulated-windows-desktop",
+          "mobile-ios-0441": "no-device",
+        };
+        const ticketTarget = targetMap[target.target_id] ?? "no-device";
+        const findingText = alerts.map((alert) => alert.summary).join(" ");
+        const description =
+          `AIT Pulse (${target.source} evidence) detected a proactive health finding on ` +
+          `${target.target_name}: ${findingText} Please investigate and remediate within the normal guardrails.`;
+        const ticket = desk.submit({
+          reportedBy: "AIT Pulse",
+          description,
+          summary: `Proactive · ${target.target_name} · ${alerts[0]!.summary}`,
+          target: ticketTarget,
+          consentGranted: ticketTarget !== "no-device",
+        });
+        pulseTickets.set(key, ticket.id);
+        startRun(
+          {
+            ticket: {
+              description,
+              requester: "AIT Pulse",
+              target: ticketTarget,
+              consent: ticketTarget !== "no-device",
+            },
+            ...(body?.provider ? { provider: body.provider } : {}),
+            deskTicketId: ticket.id,
+            proactive: true,
+          },
+          workdir,
+        );
+        json(res, 202, { ticket, duplicate: false });
+        return;
+      }
+
       // Ask the guardrails directly, with no model involved.
       if (req.method === "POST" && path === "/api/check") {
         const body = await readBody<{ command?: string }>(req);
@@ -855,6 +1067,7 @@ export async function startServer(
     port: actualPort,
     ...(actualPortalPort !== undefined ? { portalPort: actualPortalPort } : {}),
     close: async () => {
+      pulse.stop();
       await shut(consoleServer);
       if (portalServer) await shut(portalServer);
     },

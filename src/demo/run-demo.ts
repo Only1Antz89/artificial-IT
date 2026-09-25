@@ -9,7 +9,7 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { runTicket, type RunEvent } from "../agent/loop.js";
 import { selectBrainChecked, type BrainSelection, type ProviderName } from "../agent/select-brain.js";
-import { PolicyBoundGate } from "../control-plane/approvals.js";
+import { PolicyBoundGate, type ApprovalGate } from "../control-plane/approvals.js";
 import type { Run } from "../contracts/index.js";
 import {
   InMemoryZendeskClient,
@@ -30,6 +30,8 @@ export interface DemoOptions {
   workdir?: string;
   /** Start from an empty knowledge base each time. Default true. */
   fresh?: boolean;
+  /** Override for tests or an attended demo; defaults to standing policy. */
+  gate?: ApprovalGate;
   onEvent?: (scenario: Scenario, event: RunEvent) => void;
 }
 
@@ -81,7 +83,7 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoSession> {
       ...(session ? { session } : {}),
       // The standing-policy gate is what a service desk would actually deploy:
       // narrow pre-authorisation for reversible tier-1 work, humans for the rest.
-      gate: new PolicyBoundGate(),
+      gate: options.gate ?? new PolicyBoundGate(),
       evidenceRoot: workdir,
       stepBudget: 10,
       ...(options.onEvent

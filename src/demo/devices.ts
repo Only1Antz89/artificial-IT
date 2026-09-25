@@ -18,6 +18,7 @@ import {
   printQueueScreen,
   storageScreen,
   vpnScreen,
+  wifiSettingsScreen,
 } from "./screen.js";
 
 /* ------------------------------------------------------------------ *
@@ -127,6 +128,75 @@ export function makeWindowsDnsDevice(): SimulatedDeviceSession {
     state: { dns_cache_stale: true },
     fixtures: winDnsFixtures,
     screen: browserScreen,
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Windows laptop with Wi-Fi disabled - exercises governed UI control
+ * ------------------------------------------------------------------ */
+
+export const WIN_WIFI_LAPTOP: DeviceInfo = {
+  device_id: "dev-ws-2604",
+  hostname: "LON-LT-2604",
+  platform: "windows",
+  os_version: "Windows 11 23H2",
+  consent_granted: true,
+  managed: true,
+};
+
+const winWifiFixtures: CommandFixture[] = [
+  {
+    match: /^netsh\s+interface\s+show\s+interface$/i,
+    respond: (state) => ({
+      stdout: `Admin State    State          Type             Interface Name
+-------------------------------------------------------------------------
+${state["wifi_enabled"] ? "Enabled" : "Disabled"}        ${state["wifi_enabled"] ? "Connected" : "Disconnected"}   Dedicated        Wi-Fi
+Enabled        Connected      Dedicated        Ethernet`,
+    }),
+  },
+];
+
+export function makeWindowsWifiDevice(): SimulatedDeviceSession {
+  return new SimulatedDeviceSession({
+    device: WIN_WIFI_LAPTOP,
+    state: { wifi_enabled: false },
+    fixtures: winWifiFixtures,
+    screen: wifiSettingsScreen,
+    controls: [
+      {
+        action: "computer.execute_instruction",
+        respond: (state, request) => {
+          const target = request.arguments?.["target"];
+          const value = request.arguments?.["value"];
+          if (target !== "wifi" || value !== true) {
+            return {
+              ok: false,
+              action: request.action,
+              provider: "simulated",
+              observation:
+                "The instruction did not target the Wi-Fi toggle with an enabled state.",
+            };
+          }
+          return {
+            ok: true,
+            action: request.action,
+            provider: "simulated",
+            observation: state["wifi_enabled"]
+              ? "Windows Settings already showed Wi-Fi on."
+              : "Opened Network & internet settings and switched Wi-Fi on.",
+            detail: {
+              surface: "local_computer",
+              control: "Wi-Fi toggle",
+              from: Boolean(state["wifi_enabled"]),
+              to: true,
+            },
+          };
+        },
+        effect: (state) => {
+          state["wifi_enabled"] = true;
+        },
+      },
+    ],
   });
 }
 

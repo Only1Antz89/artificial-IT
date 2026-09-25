@@ -8,7 +8,7 @@
     "node": ">=22"
   },
   "bin": {
-    "ait": "./dist/cli.js"
+    "ait": "./dist/src/cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && mkdir -p dist/src/server/console dist/src/server/portal dist/src/server/ui && cp src/server/console/index.html dist/src/server/console/index.html && cp src/server/portal/index.html dist/src/server/portal/index.html && cp src/server/ui/theme.css src/server/ui/momentum-logo-positive.png src/server/ui/momentum-logo-reversed.png src/server/ui/momentum-mark.png dist/src/server/ui/",
@@ -20,6 +20,7 @@
     "cli": "tsx src/cli.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "verify:demo": "node scripts/verify-demo.mjs",
     "local": "tsx src/cli.ts local",
     "providers": "tsx src/cli.ts providers",
     "reset": "tsx src/cli.ts reset",
@@ -33,10 +34,11 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "playwright-core": "^1.63.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0",
-    "ws": "^8.18.0",
-    "@types/ws": "^8.5.13"
+    "ws": "^8.18.0"
   }
 }

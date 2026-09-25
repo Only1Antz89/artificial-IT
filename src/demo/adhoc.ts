@@ -15,7 +15,14 @@ import { hostname } from "node:os";
 import { newId, nowIso, type Severity, type Ticket } from "../contracts/index.js";
 import { LOCAL_TICKET_TAG } from "../agent/heuristic-brain.js";
 import { localDevice, hostPlatform } from "./local.js";
-import { WIN_LAPTOP, WIN_DESKTOP, WIN_FIELD, MAC_LAPTOP, MAC_DESIGNER } from "./devices.js";
+import {
+  WIN_LAPTOP,
+  WIN_DESKTOP,
+  WIN_FIELD,
+  WIN_WIFI_LAPTOP,
+  MAC_LAPTOP,
+  MAC_DESIGNER,
+} from "./devices.js";
 import { meshConfigFromEnv } from "../execution-plane/remote.js";
 import type { DeviceInfo } from "../contracts/ticket.js";
 
@@ -28,6 +35,7 @@ export type AdHocTarget =
   | "simulated-mac-laptop"
   | "simulated-mac-designer"
   | "simulated-windows-field-laptop"
+  | "simulated-windows-wifi-disabled"
   | "no-device";
 
 export interface AdHocRequest {
@@ -87,6 +95,11 @@ export const AD_HOC_TARGETS: { key: AdHocTarget; label: string; note: string }[]
     note: "BHM-LT-7781, on a 28% guest wireless signal with the VPN dropping.",
   },
   {
+    key: "simulated-windows-wifi-disabled",
+    label: "Simulated Windows laptop (Wi-Fi off)",
+    note: "LON-LT-2604, ready for an approved desktop-control action.",
+  },
+  {
     key: "no-device",
     label: "No device attached",
     note: "A request with nothing to run against - access requests, questions.",
@@ -109,6 +122,8 @@ function deviceFor(target: AdHocTarget): DeviceInfo | undefined {
       return MAC_DESIGNER;
     case "simulated-windows-field-laptop":
       return WIN_FIELD;
+    case "simulated-windows-wifi-disabled":
+      return WIN_WIFI_LAPTOP;
     case "no-device":
       return undefined;
   }

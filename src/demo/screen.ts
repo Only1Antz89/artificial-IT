@@ -67,6 +67,34 @@ export function browserScreen(state: DeviceState): ScreenCapture {
   };
 }
 
+/** Windows Network & internet settings with a stateful Wi-Fi toggle. */
+export function wifiSettingsScreen(state: DeviceState): ScreenCapture {
+  const enabled = state["wifi_enabled"] === true;
+  const body = `<rect x="40" y="70" width="${W - 80}" height="${H - 120}" fill="#ffffff" stroke="#d0d5dd" rx="8"/>
+  <text x="78" y="116" font-family="system-ui, sans-serif" font-size="22" font-weight="700" fill="#101828">Network &amp; internet</text>
+  <rect x="72" y="148" width="756" height="92" fill="#f9fafb" stroke="#eaecf0" rx="8"/>
+  <text x="100" y="184" font-family="system-ui, sans-serif" font-size="16" font-weight="650" fill="#101828">Wi-Fi</text>
+  <text x="100" y="210" font-family="system-ui, sans-serif" font-size="13" fill="#667085">${enabled ? "Connected to Momentum-Corp" : "Wireless networking is turned off"}</text>
+  <rect x="708" y="171" width="78" height="38" rx="19" fill="${enabled ? "#175cd3" : "#98a2b3"}"/>
+  <circle cx="${enabled ? 766 : 728}" cy="190" r="15" fill="#ffffff"/>
+  <text x="747" y="232" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="700" fill="${enabled ? "#175cd3" : "#667085"}">${enabled ? "ON" : "OFF"}</text>
+  <rect x="72" y="260" width="756" height="64" fill="#ffffff" stroke="#eaecf0" rx="8"/>
+  <text x="100" y="291" font-family="system-ui, sans-serif" font-size="14" fill="#101828">Known networks</text>
+  <text x="100" y="311" font-family="system-ui, sans-serif" font-size="12" fill="#667085">Momentum-Corp · Momentum-Guest</text>
+  <rect x="72" y="340" width="756" height="64" fill="#ffffff" stroke="#eaecf0" rx="8"/>
+  <text x="100" y="378" font-family="system-ui, sans-serif" font-size="14" fill="#101828">Hardware properties</text>`;
+
+  return {
+    source: "rendered",
+    svg: chrome("Settings — Network & internet", body),
+    width: W,
+    height: H,
+    description: enabled
+      ? "Windows Settings showing Wi-Fi on and connected to Momentum-Corp."
+      : "Windows Settings showing the Wi-Fi toggle switched off.",
+  };
+}
+
 /** A print queue with jobs stuck because the spooler has stopped. */
 export function printQueueScreen(state: DeviceState): ScreenCapture {
   const stopped = state["spooler_running"] === false;

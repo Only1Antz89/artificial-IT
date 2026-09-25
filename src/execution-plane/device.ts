@@ -63,6 +63,28 @@ export interface SessionCapabilities {
   canCapture: boolean;
   /** Why capture is unavailable, when it is. */
   captureUnavailableReason?: string;
+  /** Whether this session can perform an approved desktop action. */
+  canControl?: boolean;
+  /** The control plane shown to operators; never inferred from a hostname. */
+  controlProvider?: "simulated" | "ui-tars-desktop";
+  /** Why control is unavailable, when a session wants to make that explicit. */
+  controlUnavailableReason?: string;
+}
+
+/** A deliberately small, provider-neutral desktop control request. */
+export interface UIActionRequest {
+  /** Matches the governed UI-TARS/OpenClaw capability catalogue. */
+  action: string;
+  arguments?: Record<string, unknown>;
+}
+
+/** What the control backend actually observed after attempting the action. */
+export interface UIActionResult {
+  ok: boolean;
+  action: string;
+  observation: string;
+  provider: "simulated" | "ui-tars-desktop";
+  detail?: Record<string, unknown>;
 }
 
 export interface DeviceSession {
@@ -70,6 +92,8 @@ export interface DeviceSession {
   readonly sessionId: string;
   exec(command: string, timeoutMs?: number): Promise<CommandResult>;
   capture(): Promise<ScreenCapture>;
+  /** Optional by design: command-only sessions cannot silently pretend to click. */
+  control?(request: UIActionRequest): Promise<UIActionResult>;
   /** Probed once and cached; safe to call repeatedly. */
   capabilities(): Promise<SessionCapabilities>;
   end(): Promise<void>;
@@ -110,6 +134,15 @@ export interface SimulatedDeviceOptions {
   fixtures: CommandFixture[];
   /** Renders the screen from the current state. */
   screen: (state: DeviceState) => ScreenCapture;
+  /** Approved UI actions this demo device can genuinely apply to its state. */
+  controls?: UIActionFixture[];
+}
+
+export interface UIActionFixture {
+  action: string;
+  respond: (state: DeviceState, request: UIActionRequest) => UIActionResult;
+  /** Applied only after the fixture accepts the action. */
+  effect?: (state: DeviceState, request: UIActionRequest) => void;
 }
 
 export class SimulatedDeviceSession implements DeviceSession {
@@ -119,6 +152,7 @@ export class SimulatedDeviceSession implements DeviceSession {
 
   #fixtures: CommandFixture[];
   #screen: (state: DeviceState) => ScreenCapture;
+  #controls: UIActionFixture[];
   #ended = false;
 
   constructor(opts: SimulatedDeviceOptions) {
@@ -126,6 +160,7 @@ export class SimulatedDeviceSession implements DeviceSession {
     this.state = { ...opts.state };
     this.#fixtures = opts.fixtures;
     this.#screen = opts.screen;
+    this.#controls = opts.controls ?? [];
     this.sessionId = `sim_${opts.device.device_id}_${Date.now().toString(36)}`;
   }
 
@@ -166,6 +201,22 @@ export class SimulatedDeviceSession implements DeviceSession {
     return this.#screen(this.state);
   }
 
+  async control(request: UIActionRequest): Promise<UIActionResult> {
+    if (this.#ended) throw new Error("session has ended");
+    const fixture = this.#controls.find((entry) => entry.action === request.action);
+    if (!fixture) {
+      return {
+        ok: false,
+        action: request.action,
+        provider: "simulated",
+        observation: `The simulated device does not support ${request.action}.`,
+      };
+    }
+    const result = fixture.respond(this.state, request);
+    if (result.ok) fixture.effect?.(this.state, request);
+    return result;
+  }
+
   /**
    * A simulated machine knows exactly what it can do: whatever its fixtures
    * cover. Deriving this from the fixtures rather than hardcoding a list keeps
@@ -183,6 +234,10 @@ export class SimulatedDeviceSession implements DeviceSession {
       platform: this.device.platform,
       availableCommands: commands,
       canCapture: true,
+      canControl: this.#controls.length > 0,
+      ...(this.#controls.length > 0
+        ? { controlProvider: "simulated" as const }
+        : { controlUnavailableReason: "this simulated device has no desktop actions" }),
     };
   }
 
@@ -254,6 +309,9 @@ export class LocalDeviceSession implements DeviceSession {
       platform: this.device.platform,
       availableCommands: available,
       canCapture: capture.available,
+      canControl: false,
+      controlUnavailableReason:
+        "no governed desktop-control provider is attached to this local session",
       ...(capture.available ? {} : { captureUnavailableReason: capture.reason }),
     };
     return this.#capabilities;
@@ -422,9 +480,36 @@ export async function screenshotStrategy(): Promise<ScreenshotStrategy> {
   if (cachedStrategy) return cachedStrategy;
 
   if (process.platform === "darwin") {
-    cachedStrategy = (await commandExists("screencapture"))
-      ? { available: true, tool: ["screencapture", "-x", "-t", "png", "%OUT%"] }
-      : { available: false, reason: "screencapture is not available on this Mac" };
+    if (!(await commandExists("screencapture"))) {
+      cachedStrategy = {
+        available: false,
+        reason: "screencapture is not available on this Mac",
+      };
+      return cachedStrategy;
+    }
+
+    // Merely finding the binary is not enough on macOS: a headless process or
+    // one without Screen Recording permission exits non-zero. Probe once so a
+    // run does not advertise capture and then fail in front of the operator.
+    const probeFile = join(tmpdir(), `ait-capture-probe-${Date.now()}.png`);
+    try {
+      const probe = await runProcess(
+        "screencapture capability probe",
+        "screencapture",
+        ["-x", "-t", "png", probeFile],
+        8_000,
+        Date.now(),
+      );
+      cachedStrategy = probe.exit_code === 0 && existsSync(probeFile)
+        ? { available: true, tool: ["screencapture", "-x", "-t", "png", "%OUT%"] }
+        : {
+            available: false,
+            reason:
+              "Screen Recording permission or an attached display is unavailable; macOS refused a capture probe",
+          };
+    } finally {
+      rmSync(probeFile, { force: true });
+    }
     return cachedStrategy;
   }
 

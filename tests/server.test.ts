@@ -134,6 +134,85 @@ describe("static surface", () => {
   });
 });
 
+describe("integration readiness and proactive pulse", () => {
+  it("labels adapters honestly instead of treating installed code as live", async () => {
+    const response = await fetch(`${base}/api/integrations`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      components: { key: string; state: string }[];
+    };
+    expect(body.components.map((component) => component.key)).toEqual(
+      expect.arrayContaining(["ticketing", "meshcentral", "openclaw", "ui-tars", "pulse"]),
+    );
+    expect(body.components.find((component) => component.key === "ui-tars")?.state).toBe(
+      "simulated",
+    );
+    expect(body.components.find((component) => component.key === "meshcentral")?.state).not.toBe(
+      "live",
+    );
+  });
+
+  it("runs endpoint, service and mobile checks and controls the schedule", async () => {
+    const runResponse = await fetch(`${base}/api/pulse/run`, { method: "POST" });
+    expect(runResponse.status).toBe(200);
+    const { run } = (await runResponse.json()) as {
+      run: {
+        run_id: string;
+        targets: { target_id: string; kind: string; source: string }[];
+        alerts: unknown[];
+      };
+    };
+    expect(run.targets.map((target) => target.kind).sort()).toEqual([
+      "endpoint",
+      "mobile",
+      "service",
+    ]);
+    expect(run.targets.every((target) => target.source === "simulated")).toBe(true);
+    expect(run.alerts.length).toBeGreaterThan(0);
+
+    const proactive = await fetch(`${base}/api/pulse/ticket`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        runId: run.run_id,
+        targetId: "mobile-ios-0441",
+        provider: "offline",
+      }),
+    });
+    expect(proactive.status).toBe(202);
+    const proactiveTicket = (await proactive.json()) as { ticket: { id: string } };
+    let proactiveStatus = "submitted";
+    for (
+      let attempt = 0;
+      attempt < 30 && ["submitted", "working"].includes(proactiveStatus);
+      attempt += 1
+    ) {
+      const desk = (await (await fetch(`${base}/api/desk`)).json()) as {
+        tickets: { id: string; status: string }[];
+      };
+      proactiveStatus =
+        desk.tickets.find((ticket) => ticket.id === proactiveTicket.ticket.id)?.status ?? "missing";
+      if (proactiveStatus === "submitted" || proactiveStatus === "working") {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    }
+    expect(proactiveStatus).toBe("escalated");
+
+    const started = await fetch(`${base}/api/pulse/control`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true, intervalMs: 30_000 }),
+    });
+    expect(((await started.json()) as { state: { enabled: boolean } }).state.enabled).toBe(true);
+    const stopped = await fetch(`${base}/api/pulse/control`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(((await stopped.json()) as { state: { enabled: boolean } }).state.enabled).toBe(false);
+  });
+});
+
 describe("the guardrail checker endpoint", () => {
   it("blocks a credential change", async () => {
     const res = await fetch(`${base}/api/check`, {
@@ -167,6 +246,32 @@ describe("the guardrail checker endpoint", () => {
 });
 
 describe("a technician approving from the browser", () => {
+  it("runs an approved desktop action and verifies the setting changed", async () => {
+    const { done } = await drive("wifi-disabled", async (approvalId, runId) => {
+      const response = await fetch(`${base}/api/runs/${runId}/approvals/${approvalId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          approved: true,
+          approver: "sam.tech",
+          reason: "User requested Wi-Fi be restored.",
+        }),
+      });
+      expect(response.status).toBe(200);
+    });
+    const run = done?.["run"] as {
+      status: string;
+      results: { outcome: string; step: { kind: string }; command?: { stdout: string } }[];
+    };
+    expect(run.status).toBe("resolved");
+    expect(
+      run.results.some((result) => result.step.kind === "ui_action" && result.outcome === "success"),
+    ).toBe(true);
+    const verification = run.results.filter((result) => result.command).at(-1)?.command?.stdout;
+    expect(verification).toContain("Connected");
+    expect(verification).not.toContain("Disabled");
+  });
+
   it("lets an approved change reach the device", async () => {
     const { events, done } = await drive("printer-stuck", async (approvalId, runId) => {
       const res = await fetch(`${base}/api/runs/${runId}/approvals/${approvalId}`, {

@@ -424,7 +424,7 @@ function watch(reference) {
 /** Which of the three states the ticket is in, for the stepper. */
 function stageOf(ticket) {
   if (ticket.reply) return "answer";
-  if (ticket.status === "resolved" || ticket.status === "escalated") return "answer";
+  if (["resolved", "escalated", "failed"].includes(ticket.status)) return "answer";
   if (ticket.updates && ticket.updates.length > 1) return "looking";
   return "reported";
 }
@@ -456,9 +456,10 @@ function show(ticket) {
 
   // While it is still working, say so rather than leaving a static list that
   // looks like nothing is happening.
-  const settled = Boolean(ticket.reply) || ticket.status === "resolved";
-  $("resolution").hidden = !settled;
-  $("working").innerHTML = settled || ticket.question
+  const finished = ["resolved", "escalated", "failed"].includes(ticket.status);
+  const resolved = ticket.status === "resolved";
+  $("resolution").hidden = !resolved;
+  $("working").innerHTML = finished || ticket.question
     ? ""
     : `<div class="working"><span class="spin"></span>Still working on it — this page updates on its own.</div>`;
 
@@ -479,18 +480,35 @@ function show(ticket) {
       if (!answer) return;
       $("answer").disabled = true;
       $("sendAnswer").disabled = true;
-      await fetch(`/api/portal/tickets/${encodeURIComponent(ticket.reference)}/answer`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answer }),
-      });
+      try {
+        const response = await fetch(`/api/portal/tickets/${encodeURIComponent(ticket.reference)}/answer`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ answer }),
+        });
+        if (response.ok) return;
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error ?? "We could not send that answer.");
+      } catch (err) {
+        $("answer").disabled = false;
+        $("sendAnswer").disabled = false;
+        const box = document.createElement("div");
+        box.className = "err";
+        box.textContent = err.message;
+        $("ask").querySelector(".ask").append(box);
+      }
     };
     $("sendAnswer").addEventListener("click", send);
     $("answer").addEventListener("keydown", (e) => { if (e.key === "Enter") send(); });
     $("answer").focus();
   }
 
-  $("reply").innerHTML = ticket.reply
-    ? `<div class="reply enter"><h3>From IT</h3>${esc(ticket.reply)}</div>` : "";
+  const fallback = ticket.status === "escalated"
+    ? "A technician has this now and will contact you with the next step."
+    : ticket.status === "failed"
+      ? "We could not complete this automatically. A technician has been alerted."
+      : "";
+  $("reply").innerHTML = ticket.reply || fallback
+    ? `<div class="reply enter"><h3>From IT</h3>${esc(ticket.reply || fallback)}</div>` : "";
 }
 
 /* ---------------- come back to an open report ---------------- */

@@ -53,6 +53,10 @@ interface Stub {
   agentJoins: boolean;
   /** Set true to simulate a recorded session. */
   recorded: boolean;
+  /** Set true to have the control channel reject the supplied credential. */
+  rejectLogin: boolean;
+  /** Raw command frames received by the terminal relay. */
+  terminalInput: string[];
 }
 
 async function startStub(): Promise<Stub> {
@@ -60,6 +64,8 @@ async function startStub(): Promise<Stub> {
     tunnelRequests: [],
     agentJoins: true,
     recorded: false,
+    rejectLogin: false,
+    terminalInput: [],
   };
 
   const http = createServer();
@@ -73,7 +79,11 @@ async function startStub(): Promise<Stub> {
         ws.on("message", (raw) => {
           const msg = JSON.parse(String(raw));
           if (msg.action === "authcookie") {
-            ws.send(JSON.stringify({ action: "authcookie", cookie: "C1", rcookie: "R1" }));
+            if (stub.rejectLogin) {
+              ws.send(JSON.stringify({ action: "close", cause: "noauth" }));
+            } else {
+              ws.send(JSON.stringify({ action: "authcookie", cookie: "C1", rcookie: "R1" }));
+            }
           } else if (msg.type === "tunnel") {
             stub.tunnelRequests.push(msg);
           }
@@ -85,7 +95,7 @@ async function startStub(): Promise<Stub> {
         if (!stub.agentJoins) return; // open, but the agent never arrives
         // The agent joined: announce it, then behave like a shell.
         setTimeout(() => ws.send(stub.recorded ? "cr" : "c"), 5);
-        attachShell(ws);
+        attachShell(ws, stub.terminalInput!);
         return;
       }
 
@@ -93,7 +103,9 @@ async function startStub(): Promise<Stub> {
     });
   });
 
-  await new Promise<void>((resolve) => http.listen(0, resolve));
+  // Bind only loopback. Apart from matching the URL below, this keeps the test
+  // runnable in sandboxes that correctly forbid listeners on all interfaces.
+  await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
   const port = (http.address() as { port: number }).port;
 
   return {
@@ -111,6 +123,13 @@ async function startStub(): Promise<Stub> {
     set recorded(v: boolean) {
       stub.recorded = v;
     },
+    get rejectLogin() {
+      return stub.rejectLogin!;
+    },
+    set rejectLogin(v: boolean) {
+      stub.rejectLogin = v;
+    },
+    terminalInput: stub.terminalInput,
     close: () =>
       new Promise<void>((resolve) => {
         // Open WebSockets keep `http.close()` waiting forever, so drop them
@@ -124,10 +143,11 @@ async function startStub(): Promise<Stub> {
 }
 
 /** Behaves like an interactive shell: echoes the line, answers, prints a prompt. */
-function attachShell(ws: WsSocket): void {
+function attachShell(ws: WsSocket, terminalInput: string[]): void {
   ws.on("message", (raw) => {
     const text = String(raw);
     if (text === "1" || text.startsWith('{"ctrlChannel"')) return; // protocol select / options
+    terminalInput.push(text);
 
     const command = text.trim().split(";")[0]!.trim();
     // The echo of what was typed, as a real terminal produces.
@@ -135,12 +155,16 @@ function attachShell(ws: WsSocket): void {
 
     if (command.startsWith("which ")) {
       // `which` prints a full path per tool it finds, and nothing for the rest.
-      const found = command
+      const requested = command
         .slice("which ".length)
-        .split(/\s+/)
-        .filter((t) => ["df", "ps", "uptime", "uname", "getent", "curl"].includes(t));
+        .split(/\s+/);
+      const found = requested.filter((t) =>
+        ["df", "ps", "uptime", "uname", "getent", "curl"].includes(t),
+      );
       ws.send(`${found.map((t) => `/usr/bin/${t}`).join("\r\n")}\r\n`);
-      ws.send("__AIT_DONE__0\r\n");
+      // Real `which` is non-zero when even one requested command is missing,
+      // despite printing paths for every command it did find.
+      ws.send(`__AIT_DONE__${found.length === requested.length ? 0 : 1}\r\n`);
     } else if (command.startsWith("false")) {
       ws.send("something went wrong\r\n");
       ws.send("__AIT_DONE__1\r\n");
@@ -218,6 +242,33 @@ describe("the tunnel handshake", () => {
     stub.agentJoins = false;
     const s = session({ connectTimeoutMs: 300 });
     await expect(s.exec("uptime")).rejects.toThrow(/did not join the session/i);
+    expect(s.status).toBe("failed");
+    await s.end();
+  });
+
+  it("reports rejected credentials immediately", async () => {
+    stub.rejectLogin = true;
+    const s = session({ connectTimeoutMs: 4_000 });
+    const started = Date.now();
+    await expect(s.exec("uptime")).rejects.toThrow(/rejected.*login|token/i);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(s.status).toBe("failed");
+    await s.end();
+  });
+
+  it("uses the mesh domain when a configured device id is only a hash", async () => {
+    const s = new MeshCentralSession(
+      DEVICE,
+      {
+        serverUrl: `http://127.0.0.1:${stub.port}`,
+        operatorToken: "token",
+        meshId: "mesh/corp/group123",
+        connectTimeoutMs: 4_000,
+      },
+      request(),
+    );
+    await s.exec("uptime");
+    expect(stub.tunnelRequests[0]?.["nodeid"]).toBe("node/corp/abc123");
     await s.end();
   });
 
@@ -264,7 +315,27 @@ describe("running commands over the relay", () => {
     const caps = await s.capabilities();
     expect(caps.platform).toBe("linux");
     expect(caps.availableCommands).toContain("df");
+    expect(caps.availableCommands).not.toContain("something went wrong");
     expect(caps.canCapture).toBe(true);
+    await s.end();
+  });
+
+  it("puts the Windows exit-code sentinel on a later cmd input line", async () => {
+    const windows: DeviceInfo = { ...DEVICE, platform: "windows" };
+    const s = new MeshCentralSession(
+      windows,
+      {
+        serverUrl: `http://127.0.0.1:${stub.port}`,
+        operatorToken: "token",
+        meshId: "mesh//x",
+        connectTimeoutMs: 4_000,
+      },
+      request(),
+    );
+    await s.exec("false");
+    expect(stub.terminalInput.at(-1)).toBe(
+      "false\r\necho __AIT_DONE__%errorlevel%\r\n",
+    );
     await s.end();
   });
 });
@@ -294,6 +365,16 @@ describe("transcript parsing", () => {
     const result = parseShellOutput("badcmd", "badcmd\r\nnot found\r\n__AIT_DONE__127\r\n", 1);
     expect(result.exit_code).toBe(127);
     expect(result.stderr).toContain("not found");
+  });
+
+  it("strips the separately echoed Windows sentinel helper", () => {
+    const result = parseShellOutput(
+      "dir missing",
+      "dir missing\r\necho __AIT_DONE__%errorlevel%\r\nFile Not Found\r\n__AIT_DONE__1\r\n",
+      1,
+    );
+    expect(result.exit_code).toBe(1);
+    expect(result.stderr).toBe("File Not Found");
   });
 });
 

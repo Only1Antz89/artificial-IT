@@ -108,6 +108,12 @@ export function qualifyNodeId(deviceId: string, domain = ""): string {
   return deviceId.startsWith("node/") ? deviceId : `node/${domain}/${deviceId}`;
 }
 
+/** Mesh and node ids carry the same domain in their middle segment. */
+function domainFromMeshId(meshId: string): string {
+  const [kind, domain, id] = meshId.split("/");
+  return kind === "mesh" && id ? (domain ?? "") : "";
+}
+
 export class MeshCentralSession implements DeviceSession {
   readonly device: DeviceInfo;
   readonly sessionId: string;
@@ -149,11 +155,19 @@ export class MeshCentralSession implements DeviceSession {
     // relay need one each.
     this.#cookies = await new Promise<{ cookie: string; rcookie: string }>(
       (resolve, reject) => {
-        const timer = setTimeout(
-          () => reject(new Error("MeshCentral did not return auth cookies in time")),
-          this.timeout,
-        );
-        ws.addEventListener("message", (event) => {
+        const finish = (
+          outcome:
+            | { ok: true; cookies: { cookie: string; rcookie: string } }
+            | { ok: false; error: Error },
+        ) => {
+          clearTimeout(timer);
+          ws.removeEventListener("message", onMessage);
+          ws.removeEventListener("error", onError);
+          ws.removeEventListener("close", onClose);
+          if (outcome.ok) resolve(outcome.cookies);
+          else reject(outcome.error);
+        };
+        const onMessage = (event: MessageEvent) => {
           let payload: { action?: string; cookie?: string; rcookie?: string };
           try {
             payload = JSON.parse(String(event.data));
@@ -161,14 +175,40 @@ export class MeshCentralSession implements DeviceSession {
             return;
           }
           if (payload.action === "authcookie" && payload.cookie && payload.rcookie) {
-            clearTimeout(timer);
-            resolve({ cookie: payload.cookie, rcookie: payload.rcookie });
+            finish({
+              ok: true,
+              cookies: { cookie: payload.cookie, rcookie: payload.rcookie },
+            });
+          } else if (payload.action === "close") {
+            finish({
+              ok: false,
+              error: new Error(
+                "MeshCentral rejected the control-channel login. Check MESHCENTRAL_TOKEN and the operator's device permissions.",
+              ),
+            });
           }
-        });
-        ws.addEventListener("error", () => {
-          clearTimeout(timer);
-          reject(new Error("MeshCentral control channel errored during login"));
-        });
+        };
+        const onError = () =>
+          finish({
+            ok: false,
+            error: new Error("MeshCentral control channel errored during login"),
+          });
+        const onClose = () =>
+          finish({
+            ok: false,
+            error: new Error("MeshCentral closed the control channel during login"),
+          });
+        const timer = setTimeout(
+          () =>
+            finish({
+              ok: false,
+              error: new Error("MeshCentral did not return auth cookies in time"),
+            }),
+          this.timeout,
+        );
+        ws.addEventListener("message", onMessage);
+        ws.addEventListener("error", onError);
+        ws.addEventListener("close", onClose);
         ws.send(JSON.stringify({ action: "authcookie" }));
       },
     );
@@ -180,7 +220,13 @@ export class MeshCentralSession implements DeviceSession {
     if (this.#relay && this.#relay.readyState === 1) return this.#relay;
     await this.#openControl();
 
-    const nodeId = qualifyNodeId(this.request.device_id);
+    // A bare node hash is only meaningful inside a domain. The required mesh id
+    // tells us that domain (`mesh/<domain>/<hash>`), just as MeshCtrl learns it
+    // from the server before qualifying a bare node id.
+    const nodeId = qualifyNodeId(
+      this.request.device_id,
+      domainFromMeshId(this.config.meshId),
+    );
     const tunnelId = randomBytes(6).toString("hex");
     const { cookie, rcookie } = this.#cookies!;
 
@@ -248,7 +294,14 @@ export class MeshCentralSession implements DeviceSession {
    * be trustworthy.
    */
   async exec(command: string, timeoutMs = 60_000): Promise<CommandResult> {
-    const run = this.#queue.then(() => this.#execNow(command, timeoutMs));
+    const run = this.#queue.then(async () => {
+      try {
+        return await this.#execNow(command, timeoutMs);
+      } catch (error) {
+        if (this.status !== "ended") this.status = "failed";
+        throw error;
+      }
+    });
     // Keep the chain alive even when one command rejects.
     this.#queue = run.catch(() => undefined);
     return run;
@@ -260,7 +313,10 @@ export class MeshCentralSession implements DeviceSession {
 
     const windows = this.device.platform === "windows";
     const line = windows
-      ? `${command} & echo ${SENTINEL}%errorlevel%\r\n`
+      // Cmd expands every `%variable%` on a compound line before it executes
+      // that line. Put the sentinel on the next input line so `%errorlevel%`
+      // observes the command we just ran rather than the command before it.
+      ? `${command}\r\necho ${SENTINEL}%errorlevel%\r\n`
       : `${command}; echo ${SENTINEL}$?\n`;
 
     const output = await new Promise<string>((resolve, reject) => {
@@ -334,19 +390,48 @@ export class MeshCentralSession implements DeviceSession {
   async capabilities(): Promise<SessionCapabilities> {
     if (this.#capabilities) return this.#capabilities;
 
-    const probe =
+    const candidates =
       this.device.platform === "windows"
-        ? "where ipconfig systeminfo tasklist sc wmic powershell nslookup getmac"
-        : "which df du free ps top uptime hostname uname getent ping dig nslookup ip ifconfig netstat curl vm_stat sw_vers systemctl journalctl lscpu";
+        ? ["ipconfig", "systeminfo", "tasklist", "sc", "wmic", "powershell", "nslookup", "getmac"]
+        : [
+            "df",
+            "du",
+            "free",
+            "ps",
+            "top",
+            "uptime",
+            "hostname",
+            "uname",
+            "getent",
+            "ping",
+            "dig",
+            "nslookup",
+            "ip",
+            "ifconfig",
+            "netstat",
+            "curl",
+            "vm_stat",
+            "sw_vers",
+            "systemctl",
+            "journalctl",
+            "lscpu",
+          ];
+    const probe = `${this.device.platform === "windows" ? "where" : "which"} ${candidates.join(" ")}`;
 
     const result = await this.exec(probe, 30_000);
+    const candidateSet = new Set(candidates);
     const available = [
       ...new Set(
-        result.stdout
+        // `where`/`which` returns non-zero if any requested executable is
+        // absent. A terminal relay cannot separate stdout and stderr, so
+        // parseShellOutput places the whole transcript on `stderr` in that
+        // case. The paths it did find are still valid probe results.
+        `${result.stdout}\n${result.stderr}`
           .split(/\r?\n/)
           .map((l) => l.trim())
           .filter(Boolean)
-          .map((l) => (l.split(/[\\/]/).pop() ?? l).replace(/\.exe$/i, "").toLowerCase()),
+          .map((l) => (l.split(/[\\/]/).pop() ?? l).replace(/\.exe$/i, "").toLowerCase())
+          .filter((name) => candidateSet.has(name)),
       ),
     ].sort();
 
@@ -355,6 +440,9 @@ export class MeshCentralSession implements DeviceSession {
       platform: this.device.platform,
       availableCommands: available,
       canCapture,
+      canControl: false,
+      controlUnavailableReason:
+        "MeshCentral terminal/screen transport is connected, but desktop input is routed through the separate governed OpenClaw/UI-TARS bridge",
       ...(canCapture
         ? {}
         : { captureUnavailableReason: `no capture method for ${this.device.platform}` }),
@@ -440,6 +528,10 @@ export function parseShellOutput(
   if (firstNewline !== -1 && body.slice(0, firstNewline).includes(command.slice(0, 20))) {
     body = body.slice(firstNewline + 1);
   }
+  // On Windows the sentinel is sent on its own line so cmd expands
+  // `%errorlevel%` after the command completes. A terminal echoes that helper
+  // line before emitting the expanded sentinel; keep it out of real output.
+  body = body.replace(new RegExp(`^.*${SENTINEL}.*(?:\\r?\\n|$)`, "gm"), "");
   const clean = body.replace(ANSI, "").trim();
 
   return {

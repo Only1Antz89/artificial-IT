@@ -45,7 +45,17 @@ export interface PendingQuestion {
 /** What the browser receives. A superset of RunEvent with the UI's own events. */
 export type StreamEvent =
   | { type: "started"; runId: string; provider: string; model: string; note: string }
-  | { type: "host"; hostname: string; platform: string; tools: number; canCapture: boolean; captureNote?: string }
+  | {
+      type: "host";
+      hostname: string;
+      platform: string;
+      tools: number;
+      canCapture: boolean;
+      captureNote?: string;
+      canControl?: boolean;
+      controlProvider?: string;
+      controlNote?: string;
+    }
   | RunEvent
   | { type: "approval-requested"; approval: PendingApproval }
   | { type: "approval-resolved"; id: string; approved: boolean; approver: string; reason: string }

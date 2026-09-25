@@ -15,6 +15,7 @@ import { SCENARIOS, TICKETS } from "../src/demo/scenarios.js";
 import { AD_HOC_TARGETS } from "../src/demo/adhoc.js";
 import { sessionForTarget } from "../src/demo/sessions.js";
 import type { Run } from "../src/contracts/index.js";
+import { InteractiveGate } from "../src/control-plane/approvals.js";
 
 let workdir: string;
 
@@ -50,6 +51,46 @@ describe("scenario catalogue", () => {
 
   it("has no two scenarios with the same key", () => {
     expect(new Set(SCENARIOS.map((s) => s.key)).size).toBe(SCENARIOS.length);
+  });
+});
+
+describe("approved desktop control", () => {
+  it("changes the simulated setting and verifies the fix through the terminal", async () => {
+    const session = await runDemo({
+      provider: "offline",
+      scenarios: ["wifi-disabled"],
+      workdir: join(workdir, "wifi-disabled-approved"),
+      gate: new InteractiveGate(async () => ({
+        approved: true,
+        approver: "demo-technician",
+        reason: "Approved during the attended demo.",
+      })),
+    });
+    const result = session.results[0]!.run;
+
+    expect(result.status).toBe("resolved");
+    expect(
+      result.results.some(
+        (entry) => entry.step.kind === "ui_action" && entry.outcome === "success",
+      ),
+    ).toBe(true);
+    const checks = result.results.filter(
+      (entry) => entry.command?.command === "netsh interface show interface",
+    );
+    expect(checks).toHaveLength(2);
+    expect(checks[0]!.command!.stdout).toContain("Disabled");
+    expect(checks[1]!.command!.stdout).not.toContain("Disabled");
+  });
+
+  it("keeps desktop control behind approval in the unattended demo", async () => {
+    const result = await run("wifi-disabled");
+    expect(result.status).toBe("escalated");
+    expect(
+      result.results.some(
+        (entry) =>
+          entry.step.kind === "ui_action" && entry.outcome === "awaiting_approval",
+      ),
+    ).toBe(true);
   });
 });
 

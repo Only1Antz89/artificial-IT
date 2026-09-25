@@ -23,8 +23,7 @@ Node 22 matters specifically — the MeshCentral transport uses the built-in
 ## 2. Get the code
 
 ```bash
-git clone -b claude/aillium-it-assistant-demo-8hjdus \
-  https://github.com/Only1Antz89/artificial-IT.git
+git clone https://github.com/Only1Antz89/artificial-IT.git
 cd artificial-IT
 npm install
 ```
@@ -125,6 +124,15 @@ verified, and appears in the audit trail under your name.
 Afterwards there is an **Undo** button against each change. Press it and the
 rollback actually runs — through the same policy engine, recorded the same way.
 
+**Computer control, without pretending a real client is attached.** Open
+**Prepared**, choose *Wi-Fi switched off in Windows Settings*, and run it with
+the offline provider. AIT captures the Settings state, proves the interface is
+disabled in the terminal, and asks you to approve a UI action. Approve it: the
+stateful desktop changes, a provider receipt is retained, and the same terminal
+check must report `Connected` before the ticket resolves. The session is
+labelled `simulated`; its action shape matches the curated OpenClaw/UI-TARS
+bridge.
+
 **Something vague.** *"Something is wrong with my machine and I'm not sure
 what."*
 
@@ -149,7 +157,8 @@ of health.
 
 ### The queue
 
-**Work the whole queue** takes every open ticket in one go and reports the
+**Run prepared help-desk queue** takes the configured Zendesk queue, or the
+fixture queue when Zendesk is not configured, and reports the
 shift: how many were auto-resolved, how many went to a human, what was blocked
 and by which category, median time to resolve.
 
@@ -158,6 +167,16 @@ figure is labelled as the model's own estimate — everything else on that panel
 is counted from what actually happened.
 
 ### The two side panels
+
+The left **Operations** card gives every adapter an explicit `LIVE`,
+`CONFIGURED`, `SIMULATED` or `UNAVAILABLE` state. **Probe configured bridges**
+only turns OpenClaw/UI-TARS live after the governed capability endpoint answers.
+Under it, **Run now** performs a read-only pulse across a simulated endpoint,
+print service and MDM-enrolled mobile device. Open one of its findings as a
+proactive ticket to show that scheduled detection re-enters the normal
+guardrail and approval workflow.
+
+The 30-second schedule is opt-in and can be stopped from the same card.
 
 **What it has learned** lists every entry from prior tickets, searchable, each
 with a **forget** button. Run the intranet ticket, then the same problem on a
@@ -185,14 +204,15 @@ npm run queue
 
 ### Prepared tickets
 
-The **Prepared** tab still holds the five scripted scenarios if you want a known
+The **Prepared** tab holds ten deterministic scenarios if you want a known
 path — useful for a rehearsal, or if the room has no problem to offer.
 
 ## Screen recording
 
-macOS gates screen capture behind a permission, and `screencapture` **succeeds
-without it** — you get a picture of the desktop wallpaper and nothing else. It
-fails silently, which is why `doctor` flags it rather than guessing.
+macOS gates screen capture behind a permission. Depending on the host,
+`screencapture` either fails or returns a restricted frame without it. AIT runs
+a one-time capture probe and reports capture unavailable when macOS refuses it;
+`doctor` still flags the privacy requirement so you can verify it by eye.
 
 Grant it once:
 

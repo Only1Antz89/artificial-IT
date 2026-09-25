@@ -64,19 +64,7 @@ export async function executeStep(
       case "ask_user":
         return runAskUser(step, verdict, ctx, started_at);
       case "ui_action":
-        // Driving a desktop needs a GUI automation backend, and there is not
-        // one wired up. Failing honestly beats reporting "skipped", which reads
-        // like a decision rather than a missing capability - and a run that
-        // appears to have clicked something it never clicked is the worst of
-        // both.
-        return {
-          ...base,
-          outcome: "failed",
-          finished_at: nowIso(),
-          observation:
-            "AIT has no UI automation backend, so it cannot drive the desktop directly.",
-          error: "no UI automation backend is configured",
-        };
+        return await runUiAction(step, verdict, ctx, started_at);
 
       default:
         // `ticket_comment` and `knowledge_lookup` are the agent loop's own
@@ -98,6 +86,53 @@ export async function executeStep(
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+async function runUiAction(
+  step: PlanStep,
+  verdict: PolicyVerdict,
+  ctx: ExecutionContext,
+  started_at: string,
+): Promise<StepResult> {
+  if (!ctx.session) throw new Error("no device session is open");
+  if (!ctx.session.control) {
+    throw new Error(
+      "no governed desktop-control backend is attached to this device session",
+    );
+  }
+
+  const action = String(step.payload["action"] ?? "").trim();
+  if (!action) throw new Error("the UI action has no action name");
+  const rawArguments = step.payload["arguments"];
+  const args =
+    rawArguments && typeof rawArguments === "object" && !Array.isArray(rawArguments)
+      ? (rawArguments as Record<string, unknown>)
+      : undefined;
+  const result = await ctx.session.control({
+    action,
+    ...(args ? { arguments: args } : {}),
+  });
+
+  // UI control has no terminal stdout to preserve, so retain the exact backend
+  // receipt instead. This is the evidence that a simulated or live provider
+  // said it acted; the subsequent diagnostic is still what verifies the fix.
+  const artifact = ctx.evidence.put(
+    `${step.id}-ui-action.json`,
+    JSON.stringify(result, null, 2),
+    "application/json",
+    `${result.provider} receipt for ${action}`,
+  );
+
+  return {
+    step,
+    verdict,
+    outcome: result.ok ? "success" : "failed",
+    started_at,
+    finished_at: nowIso(),
+    observation: result.observation,
+    artifacts: [artifact],
+    ...(result.ok ? {} : { error: result.observation }),
+  };
 }
 
 async function runCommand(

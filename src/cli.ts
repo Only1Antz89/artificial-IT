@@ -31,6 +31,7 @@ import { selectBrain } from "./agent/select-brain.js";
 import { runDoctor, type CheckState } from "./doctor.js";
 import * as nodeFs from "node:fs";
 import { checkClaudeModel, checkOpenAIModel, withTimeout } from "./agent/model-check.js";
+import { positionalArgs } from "./cli-args.js";
 
 const c = {
   dim: (s: string) => `\x1b[2m${s}\x1b[0m`,
@@ -112,7 +113,7 @@ function printEvent(scenario: Scenario, event: RunEvent): void {
 
 async function cmdDemo(args: string[]): Promise<void> {
   const provider = readFlag(args, "--provider") as ProviderName | undefined;
-  const keys = args.filter((a) => !a.startsWith("-"));
+  const keys = positionalArgs(args, ["--provider"]);
 
   const session = await runDemo({
     ...(provider ? { provider } : {}),

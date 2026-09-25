@@ -77,6 +77,13 @@ reaches the device; decline it and the run escalates with the change un-made.
 It also carries the guardrail checker, so you can interrogate the policy engine
 from the same screen without a model in the loop.
 
+The left-side **Operations** card separates `LIVE`, `CONFIGURED`, `SIMULATED`
+and `UNAVAILABLE` rather than turning every installed adapter green. It also
+runs AIT Pulse on demand or every 30 seconds. Pulse checks endpoint, service
+and mobile posture through the same read-only policy gate, retains raw evidence,
+and can open an ordinary proactive ticket for any finding; remediation then
+follows the same approval and escalation flow as a user-raised ticket.
+
 ## Running against your own machine
 
 Everything else is simulated so it behaves the same everywhere. These two are
@@ -119,6 +126,9 @@ rectangle.
 | Undo an applied change | `src/server/undo.ts` |
 | Queue mode and shift metrics | `src/demo/run-queue.ts`, `src/demo/metrics.ts` |
 | Remote device sessions over MeshCentral | `src/execution-plane/remote.ts` |
+| Approved desktop actions with verification | `src/execution-plane/device.ts`, `src/integrations/openclaw-session.ts` |
+| Governed OpenClaw → UI-TARS bridge client | `src/integrations/openclaw.ts` |
+| Periodic endpoint, service and mobile health pulse | `src/pulse/` |
 
 ## The guardrails
 
@@ -186,10 +196,10 @@ Models are overridable: `ANTHROPIC_MODEL`, `OPENAI_MODEL`.
 
 ## The demo
 
-Nine scenarios, each exercising a different part of the system:
+Ten scenarios, each exercising a different part of the system:
 
 ```bash
-npm run demo                    # all nine
+npm run demo                    # all ten
 npm run demo -- dns-outage      # just one
 npm run cli -- scenarios        # list them, including the local ones
 npm run cli -- providers        # which providers are configured and verified
@@ -214,6 +224,7 @@ npm run queue                   # every open ticket, with a shift summary
 | `vpn-drop` | The security-controls guardrail; a root cause read out of a real number (28% signal) rather than matched as a string; routed to security operations |
 | `phishing` | A security report: read-only endpoint checks find the downloaded attachment, nothing is remediated on the device |
 | `mailbox-access` | The compliance guardrail blocks the direct grant **and** the forwarding workaround the user offers instead |
+| `wifi-disabled` | Computer control: terminal diagnosis, technician approval, a stateful UI-TARS-shaped Settings action, a provider receipt, and a terminal re-check proving Wi-Fi is connected |
 
 A refusal freezes changes, not the investigation. After a hard block nothing
 mutating runs for the rest of the ticket — but the read-only diagnosis carries
@@ -291,7 +302,13 @@ ZENDESK_API_TOKEN=...
 # MeshCentral (remote device sessions)
 MESHCENTRAL_URL=https://mesh.acme.internal
 MESHCENTRAL_TOKEN=...
-MESHCENTRAL_MESH_ID=...
+MESHCENTRAL_MESH_ID=mesh/domain/id
+MESHCENTRAL_DEVICE_ID=node/domain/id
+
+# Alternative project's curated OpenClaw gateway
+# (the gateway then talks to UI-TARS Desktop)
+OPENCLAW_BRIDGE_URL=http://127.0.0.1:18789
+OPENCLAW_BRIDGE_RUNTIME_TOKEN=...
 ```
 
 `HttpZendeskClient` talks to the Zendesk Support API v2.
@@ -304,6 +321,24 @@ capture runs the platform's own tool and reads the PNG back.
 
 TLS verification is never disabled. MeshCentral installs commonly use a private
 CA — point `NODE_EXTRA_CA_CERTS` at it.
+
+Desktop input is deliberately a separate, governed path. AIT calls the
+alternative project's curated OpenClaw routes, and OpenClaw forwards to
+UI-TARS Desktop only when the
+caller supplies a short-lived `desktopControlToken` plus the complete run,
+step, fence and cancellation context. This repository never mints or fakes that
+authority. `http://` is accepted only for a loopback gateway; remote gateways
+must use HTTPS.
+
+Out of the box, the console labels MeshCentral and OpenClaw as unavailable and
+UI-TARS control as simulated. The prepared Wi-Fi scenario is stateful and uses
+the live action contract, but it is not presented as a real remote click. Press
+**Probe configured bridges** in the Operations card to promote a component to
+live only after it actually answers.
+
+See [INTEGRATIONS.md](INTEGRATIONS.md) for the audited repository layout,
+compatibility notes and the exact path from ticket to terminal and desktop
+control.
 
 ## Model verification
 
@@ -322,7 +357,7 @@ does not block a run that would otherwise succeed — it is reported as
 ## Development
 
 ```bash
-npm test          # 255 tests
+npm test
 npm run typecheck
 npm run build
 ```

@@ -249,8 +249,12 @@ export class HeuristicBrain implements Brain {
     const fixes = playbook.fixes[platform];
     const ran = new Set(
       history
-        .filter((h) => h.step.kind === "command")
-        .map((h) => String(h.step.payload["command"])),
+        .map((h) => {
+          if (h.step.kind === "command") return String(h.step.payload["command"]);
+          if (h.step.kind === "ui_action") return String(h.step.payload["action"]);
+          return "";
+        })
+        .filter(Boolean),
     );
 
     // Phase 1 - work through the read-only checks, one at a time, so each is
@@ -305,6 +309,16 @@ export class HeuristicBrain implements Brain {
 
     const nextFix = fixes.find((f) => !ran.has(f.command));
     if (nextFix) {
+      if (nextFix.kind === "ui_action" && !input.capabilities?.canControl) {
+        return {
+          steps: [],
+          resolved: false,
+          wants_human: true,
+          root_cause: playbook.rootCause,
+          reasoning:
+            "The fault is confirmed, but this session has no governed desktop-control provider attached.",
+        };
+      }
       return {
         steps: [toStep(nextFix, playbook)],
         resolved: false,
@@ -409,6 +423,26 @@ export class HeuristicBrain implements Brain {
         })),
         resolved: false,
         reasoning: `Running ${next.length} read-only check(s) against this machine.`,
+      };
+    }
+
+    // "Attempted" is not the same thing as "completed". A diagnostic can be
+    // proposed successfully and still fail because the binary disappeared,
+    // the endpoint rejected it, or the runner could not start it. Treating a
+    // missing/non-zero result as a clean reading lets local-health issue a
+    // clean bill of health without evidence. Every selected check is required
+    // evidence, so an incomplete one makes the assessment inconclusive.
+    const incomplete = incompleteLocalDiagnostics(checks, platform, input.history);
+    if (incomplete.length > 0) {
+      return {
+        steps: [],
+        resolved: false,
+        wants_human: true,
+        reasoning: `Could not complete ${incomplete.length} required diagnostic check(s): ${incomplete
+          .map(({ check, result }) =>
+            `${check.intent} (${result?.observation || result?.error || "no result returned"})`,
+          )
+          .join("; ")}. The available evidence is incomplete, so this machine cannot be reported healthy.`,
       };
     }
 
@@ -773,6 +807,39 @@ function readFaults(
   return faults;
 }
 
+/**
+ * Required local checks which did not produce trustworthy command evidence.
+ *
+ * Use the latest run because a verifier supersedes the original diagnostic.
+ * Matching by `local_check` survives a command changing in future; the command
+ * fallback keeps older run records readable.
+ */
+function incompleteLocalDiagnostics(
+  checks: LocalCheck[],
+  platform: HostPlatform,
+  history: StepResult[],
+): { check: LocalCheck; result?: StepResult }[] {
+  const incomplete: { check: LocalCheck; result?: StepResult }[] = [];
+  for (const check of checks) {
+    const command = check.command[platform];
+    const runs = history.filter(
+      (h) =>
+        h.step.payload["local_check"] === check.id ||
+        String(h.step.payload["command"] ?? "") === command,
+    );
+    const result = runs[runs.length - 1];
+    if (
+      !result ||
+      result.outcome !== "success" ||
+      !result.command ||
+      result.command.exit_code !== 0
+    ) {
+      incomplete.push({ check, ...(result ? { result } : {}) });
+    }
+  }
+  return incomplete;
+}
+
 /** Playbooks whose fault shows up on screen and is worth photographing. */
 const VISUAL_CATEGORIES = new Set(["printing", "connectivity", "storage"]);
 
@@ -797,6 +864,21 @@ const VISUAL_CATEGORIES = new Set(["printing", "connectivity", "storage"]);
  * having - it is what the user is looking at.
  */
 const ANNOTATIONS: Record<string, { caption: string; marks: Annotation[] }> = {
+  "pb.wifi-disabled": {
+    caption: "Windows network settings before the approved desktop action",
+    marks: [
+      {
+        style: "problem" as const,
+        box: { x: 700, y: 162, width: 94, height: 78 },
+        label: "Wi-Fi is switched off",
+      },
+      {
+        style: "action" as const,
+        box: { x: 80, y: 166, width: 590, height: 58 },
+        label: "The approved UI action will restore this setting",
+      },
+    ],
+  },
   "pb.dns-resolution": {
     caption: "Browser error at the point the user reported the fault",
     marks: [
@@ -884,9 +966,16 @@ function screenshotStep(playbook: Playbook): PlanStep {
 function toStep(step: PlaybookStep, playbook: Playbook): PlanStep {
   return {
     id: newId("step"),
-    kind: "command",
+    kind: step.kind ?? "command",
     intent: step.intent,
-    payload: { command: step.command, playbook: playbook.id },
+    payload:
+      step.kind === "ui_action"
+        ? {
+            action: step.command,
+            arguments: step.arguments ?? {},
+            playbook: playbook.id,
+          }
+        : { command: step.command, playbook: playbook.id },
     mutating: step.mutating,
     ...(step.rollback ? { rollback: step.rollback } : {}),
     ...(step.rollbackCommand ? { rollback_command: step.rollbackCommand } : {}),
@@ -900,6 +989,8 @@ function firstName(name: string): string {
 /** Turn the technical root cause into something worth reading in an email. */
 function plainCause(playbook: Playbook | undefined, fallback: string): string {
   switch (playbook?.id) {
+    case "pb.wifi-disabled":
+      return "Wi-Fi had been switched off in Windows Settings, so the laptop could not join a wireless network.";
     case "pb.dns-resolution":
       return "Your machine was holding on to an out-of-date address for the site, which is why it wouldn't load even though your connection was fine.";
     case "pb.print-spooler":

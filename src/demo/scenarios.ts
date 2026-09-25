@@ -1,7 +1,7 @@
 /**
  * Demo scenarios.
  *
- * Nine tickets, each chosen to exercise a different part of the system:
+ * Ten tickets, each chosen to exercise a different part of the system:
  *
  *   dns-outage     end-to-end fix: diagnose, apply a pre-authorised reversible
  *                  change, verify it worked, resolve, and learn from it.
@@ -20,6 +20,8 @@
  *                  that can actually act on it.
  *   mailbox-access the compliance guardrail, including the workaround the user
  *                  offers when the first request is refused.
+ *   wifi-disabled  an approved UI-TARS-shaped desktop action, followed by a
+ *                  terminal re-check that proves the setting changed.
  *
  * The tickets deliberately read like real ones - vague, a bit emotional, and
  * missing the details you would want.
@@ -31,10 +33,12 @@ import {
   WIN_DESKTOP,
   WIN_FIELD,
   WIN_LAPTOP,
+  WIN_WIFI_LAPTOP,
   makeMacDnsDevice,
   makeMacFullDiskDevice,
   makeWindowsDnsDevice,
   makeWindowsPrintDevice,
+  makeWindowsWifiDevice,
   makeWindowsVpnDevice,
 } from "./devices.js";
 import type { SimulatedDeviceSession } from "../execution-plane/device.js";
@@ -253,6 +257,27 @@ export const TICKETS: ZendeskTicket[] = [
     comments: [],
     custom_fields: [],
   },
+  {
+    id: 4830,
+    subject: "Wi-Fi is switched off and I cannot turn it back on",
+    description:
+      "My Windows laptop says Wi-Fi is turned off, so I cannot see any wireless networks. Ethernet works at my desk. Please turn Wi-Fi back on for me — I need to move into a meeting room in ten minutes.",
+    status: "new",
+    priority: "high",
+    tags: ["connectivity", "desktop-control"],
+    requester_id: 503,
+    created_at: "2026-09-06T11:04:00Z",
+    updated_at: "2026-09-06T11:04:00Z",
+    comments: [],
+    custom_fields: deviceFields({
+      device_id: WIN_WIFI_LAPTOP.device_id,
+      hostname: WIN_WIFI_LAPTOP.hostname,
+      platform: "windows",
+      os_version: WIN_WIFI_LAPTOP.os_version,
+      managed: true,
+      consent: true,
+    }),
+  },
 ];
 
 export interface Scenario {
@@ -336,6 +361,14 @@ export const SCENARIOS: Scenario[] = [
     demonstrates:
       "The compliance guardrail blocks both the direct grant and the forwarding workaround, and the seeded knowledge entry for the same request is recalled.",
     makeSession: () => undefined,
+  },
+  {
+    key: "wifi-disabled",
+    ticketId: 4830,
+    title: "Wi-Fi switched off in Windows Settings",
+    demonstrates:
+      "Computer control: diagnose the disabled interface in the terminal, pause for technician approval, perform a stateful UI-TARS-shaped Settings action, and verify the interface is connected.",
+    makeSession: makeWindowsWifiDevice,
   },
 ];
 
